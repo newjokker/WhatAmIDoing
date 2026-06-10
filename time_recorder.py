@@ -30,7 +30,7 @@ import urllib.error
 # ═══════════════════════════════════════
 #  默认配置
 # ═══════════════════════════════════════
-DEFAULT_INTERVAL = 45          # 弹窗间隔（分钟）
+DEFAULT_INTERVAL = 5           # 弹窗间隔（分钟，默认 5min 方便测试）
 DEFAULT_IDLE_THRESHOLD = 5     # 空闲阈值（分钟），超过此值视为电脑无人使用
 DEFAULT_PRESETS = ["写代码", "开会", "阅读", "学习", "思考", "摸鱼"]
 
@@ -146,16 +146,16 @@ class TimeRecorder(rumps.App):
         # ── 设置子菜单 ──
         self.settings_menu = rumps.MenuItem("⚙ 设置")
 
-        # 记录间隔
+        # 记录间隔（含 1min / 2min 方便测试）
         self.interval_submenu = rumps.MenuItem("⏱ 记录间隔")
         self._setup_duration_menu(self.interval_submenu, self.interval_minutes,
-                                  [15, 30, 45, 60, 90, 120], self._on_set_interval)
+                                  [1, 2, 5, 15, 30, 45, 60, 90, 120], self._on_set_interval)
         self.settings_menu.add(self.interval_submenu)
 
-        # 空闲阈值
+        # 空闲阈值（含 0 = 关闭空闲检测，始终弹窗）
         self.idle_submenu = rumps.MenuItem("💤 空闲阈值")
         self._setup_duration_menu(self.idle_submenu, self.idle_threshold_minutes,
-                                  [1, 3, 5, 10, 15, 30], self._on_set_idle_threshold)
+                                  [0, 1, 3, 5, 10, 15, 30], self._on_set_idle_threshold)
         self.settings_menu.add(self.idle_submenu)
 
         # 预设选项管理
@@ -165,6 +165,13 @@ class TimeRecorder(rumps.App):
 
         # ── 检查更新 ──
         self.update_item = rumps.MenuItem("🔄 检查更新", callback=self.check_update)
+
+        # ── 测试工具（开发用） ──
+        self.test_menu = rumps.MenuItem("🧪 测试")
+        reset_timer = rumps.MenuItem("⏱ 重置计时器（下次立即弹窗）", callback=self._reset_timer)
+        clear_acts = rumps.MenuItem("🗑 清空全部记录", callback=self._clear_all_activities)
+        self.test_menu.add(reset_timer)
+        self.test_menu.add(clear_acts)
 
         # ── 组装主菜单 ──
         self.menu = [
@@ -177,6 +184,7 @@ class TimeRecorder(rumps.App):
             self.all_item,
             None,
             self.settings_menu,
+            self.test_menu,
             self.update_item,
             None,
             rumps.MenuItem("❓ 关于", callback=self.show_about),
@@ -189,7 +197,7 @@ class TimeRecorder(rumps.App):
     def _setup_duration_menu(self, parent, current_value, values, callback):
         """为子菜单添加时长选项列表"""
         for v in values:
-            label = f"{v} 分钟"
+            label = "关闭（始终弹窗）" if v == 0 else f"{v} 分钟"
             item = rumps.MenuItem(label, callback=callback)
             item.state = (v == current_value)
             item._setting_value = v
@@ -317,6 +325,11 @@ class TimeRecorder(rumps.App):
         elapsed = (now - last_check).total_seconds() / 60
 
         if elapsed >= self.interval_minutes:
+            # idle_threshold = 0 表示关闭空闲检测，始终弹窗
+            if self.idle_threshold_minutes == 0:
+                self._show_recording_dialog()
+                return
+
             idle_seconds = get_idle_time()
             idle_minutes = idle_seconds / 60
 
@@ -372,6 +385,37 @@ class TimeRecorder(rumps.App):
     def trigger_record(self, _):
         """手动触发立即记录"""
         self._show_recording_dialog()
+
+    def _reset_timer(self, _):
+        """重置计时器：将 last_check_time 设为 interval 之前，下次 tick 立即弹窗"""
+        now = datetime.datetime.now()
+        self.last_check_time = (now - datetime.timedelta(minutes=self.interval_minutes + 1)).isoformat()
+        self._save_config()
+        rumps.notification(
+            title="⏱ 计时器已重置",
+            subtitle=f"将在 {self.interval_minutes} 分钟内弹窗",
+            message="（若空闲检测开启且电脑空闲中则跳过）",
+            sound=False,
+        )
+
+    def _clear_all_activities(self, _):
+        """清空全部记录（测试用）"""
+        result = rumps.alert(
+            title="⚠️ 确认清空",
+            message=f"将删除全部 {len(self.activities)} 条活动记录，此操作不可撤销！",
+            ok="清空",
+            cancel="取消",
+        )
+        if result:
+            self.activities = []
+            self._save_config()
+            self._update_last_activity()
+            rumps.notification(
+                title="🗑 已清空",
+                subtitle="全部活动记录已删除",
+                message="",
+                sound=False,
+            )
 
     def _record_activity(self, activity):
         """记录一条活动"""
