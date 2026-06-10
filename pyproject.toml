@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools", "py2app"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "time-recorder"
+version = "1.0.0"
+description = "⏰ 时间记录器 — macOS 菜单栏活动记录器"
+readme = "README.md"
+requires-python = ">=3.6"
+license = {text = "MIT"}
+authors = [
+    {name = "newjokker"},
+]
+keywords = ["time", "tracker", "macos", "menubar", "productivity"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: MacOS X :: Cocoa",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: Chinese (Simplified)",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3",
+    "Topic :: Office/Business :: Scheduling",
+]
+urls = {Homepage = "https://github.com/newjokker/TimeRecorder", Source = "https://github.com/newjokker/TimeRecorder", Releases = "https://github.com/newjokker/TimeRecorder/releases"}
+
+[tool.py2app]
+app = ["time_recorder.py"]
+iconfile = "icon.icns"
+frameworks = ["/opt/miniconda3/lib/libffi.8.dylib"]
+includes = ["ctypes"]
+packages = ["rumps"]
+plist = {CFBundleName = "时间记录器", CFBundleDisplayName = "⏰ 时间记录器", CFBundleIdentifier = "com.timerecorder.app", CFBundleVersion = "1.0.0", CFBundleShortVersionString = "1.0.0", CFBundleExecutable = "time_recorder", CFBundleDevelopmentRegion = "zh_CN", LSUIElement = true}
