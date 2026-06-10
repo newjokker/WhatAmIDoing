@@ -1,6 +1,10 @@
 # 变更日志
 
-## v1.2.1 (2026-06-10)
+## v1.2.2 (2026-06-10)
+
+### 修复
+- **`ok_btn.tag = 1` 报 `read-only` 错误**：PyObjC 中 NSButton 的 `tag` 是只读属性，需用 `setTag_()` 方法
+- **回退通知也崩溃**：`rumps.notification` 在非打包环境下（直接跑 Python 脚本时）因缺少 Info.plist 也会报错，改为 `stderr` 打印
 
 ### 修复
 - **修复打包后无弹窗问题**：NSPanel 改用 `NSButtonTypeSwitch` / `NSBezelStyleRounded` 等新 API 常量名

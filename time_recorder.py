@@ -13,7 +13,7 @@
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.2.1"
+__version__ = "1.2.2"
 __app_name__ = "⏰ 时间记录器"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
@@ -347,13 +347,10 @@ class TimeRecorder(rumps.App):
         try:
             self._show_panel_dialog()
         except Exception as e:
-            # NSPanel 失败时回退到 rumps.Window
-            rumps.notification(
-                title="⚠️ 面板加载失败",
-                subtitle=f"{e}",
-                message="回退到文本模式",
-                sound=False,
-            )
+            # NSPanel 失败时回退到 rumps.Window（例如直接跑 Python 脚本时）
+            # 注意：rumps.notification 在未打包时也可能失败，忽略它
+            import sys as _sys
+            _sys.stderr.write(f"[TimeRecorder] NSPanel 回退: {e}\n")
             self._show_fallback_dialog()
         self.recording_lock = False
 
@@ -442,7 +439,7 @@ class TimeRecorder(rumps.App):
         ok_btn.setKeyEquivalent_("\r")
         ok_btn.setTarget_(panel)
         ok_btn.setAction_("stopModalWithCode:")
-        ok_btn.tag = 1
+        ok_btn.setTag_(1)
         content.addSubview_(ok_btn)
 
         cancel_btn = AppKit.NSButton.alloc().initWithFrame_(
@@ -452,7 +449,7 @@ class TimeRecorder(rumps.App):
         cancel_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
         cancel_btn.setTarget_(panel)
         cancel_btn.setAction_("stopModalWithCode:")
-        cancel_btn.tag = 0
+        cancel_btn.setTag_(0)
         content.addSubview_(cancel_btn)
 
         panel.setDefaultButtonCell_(ok_btn.cell())
