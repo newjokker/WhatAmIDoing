@@ -4,15 +4,15 @@
 基于 rumps 实现
 
 功能:
-    - 每 N 分钟（默认 45 分钟）弹窗询问"当前在做什么"
-    - 检测电脑是否在使用中（空闲超过阈值则跳过）
+    - 每 N 分钟（默认 5 分钟）弹窗询问"当前在做什么"
+    - 检测电脑是否在使用中（空闲超过阈值则跳过，可关闭）
     - 预设选项快速选择 + 自定义输入
     - 今日 / 本周 / 全部活动汇总
     - 自定义预设活动列表
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __app_name__ = "⏰ 时间记录器"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
@@ -576,7 +576,8 @@ class TimeRecorder(rumps.App):
                 "macOS 菜单栏活动记录器\n\n"
                 f"默认每 {DEFAULT_INTERVAL} 分钟询问一次当前活动\n"
                 "检测到电脑空闲超过阈值时自动跳过\n"
-                "支持今日 / 本周 / 全部汇总\n\n"
+                "支持今日 / 本周 / 全部汇总\n"
+                "🧪 测试菜单方便快速验证\n\n"
                 "基于 Python rumps 构建\n"
                 f"版本: v{__version__}"
             ),
