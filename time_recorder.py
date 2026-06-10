@@ -13,7 +13,7 @@
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.2.2"
+__version__ = "1.2.3"
 __app_name__ = "⏰ 时间记录器"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
@@ -344,156 +344,169 @@ class TimeRecorder(rumps.App):
         self.last_check_time = datetime.datetime.now().isoformat()
         self._save_config()
 
-        try:
-            self._show_panel_dialog()
-        except Exception as e:
-            # NSPanel 失败时回退到 rumps.Window（例如直接跑 Python 脚本时）
-            # 注意：rumps.notification 在未打包时也可能失败，忽略它
-            import sys as _sys
-            _sys.stderr.write(f"[TimeRecorder] NSPanel 回退: {e}\n")
+        # 尝试原生面板，失败或不可用时回退到文本对话框
+        if not self._try_panel_dialog():
             self._show_fallback_dialog()
+
         self.recording_lock = False
 
-    def _show_panel_dialog(self):
-        """原生 Cocoa 面板对话框（复选框按钮 + 自定义输入）"""
+    def _try_panel_dialog(self):
+        """原生 Cocoa 面板对话框（复选框按钮 + 自定义输入）。
+        返回 True 表示成功完成，False 表示失败需回退。"""
         import AppKit
         import Foundation
 
-        max_cols = 3
-        btn_w, btn_h = 155, 26
-        gap_x, gap_y = 8, 6
-        rows = (len(self.presets) + max_cols - 1) // max_cols
-        content_w = 20 + max_cols * btn_w + (max_cols - 1) * gap_x + 20
-        btn_area_h = rows * btn_h + (rows - 1) * gap_y
-        panel_w = max(int(content_w), 480)
-        panel_h = 60 + 30 + btn_area_h + 60 + 28 + 8 + 28 + 8
+        panel = None
+        try:
+            # ── 计算布局 ──
+            max_cols = 3
+            btn_w, btn_h = 155, 26
+            gap_x, gap_y = 8, 6
+            rows = (len(self.presets) + max_cols - 1) // max_cols
+            content_w = 20 + max_cols * btn_w + (max_cols - 1) * gap_x + 20
+            btn_area_h = rows * btn_h + (rows - 1) * gap_y
+            panel_w = max(int(content_w), 480)
+            panel_h = 60 + 30 + btn_area_h + 60 + 28 + 8 + 28 + 8
 
-        panel = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            Foundation.NSMakeRect(0, 0, panel_w, panel_h),
-            AppKit.NSTitledWindowMask | AppKit.NSClosableWindowMask,
-            AppKit.NSBackingStoreBuffered,
-            False,
-        )
-        panel.setTitle_("⏰ 时间记录")
-        panel.setFloatingPanel_(True)
-        panel.center()
-        panel.makeKeyAndOrderFront_(None)
-
-        content = panel.contentView()
-
-        # ── 标题 ──
-        title_lbl = AppKit.NSTextField.alloc().initWithFrame_(
-            Foundation.NSMakeRect(20, panel_h - 52, panel_w - 40, 28)
-        )
-        title_lbl.setStringValue_("现在在做什么？ 点击勾选，或输入自定义活动")
-        title_lbl.setBezeled_(False)
-        title_lbl.setDrawsBackground_(False)
-        title_lbl.setEditable_(False)
-        title_lbl.setFont_(AppKit.NSFont.boldSystemFontOfSize_(14))
-        content.addSubview_(title_lbl)
-
-        # ── 预设切换按钮 ──
-        toggle_buttons = []
-        start_y = panel_h - 95
-
-        for i, preset in enumerate(self.presets):
-            col = i % max_cols
-            row = i // max_cols
-            x = 20 + col * (btn_w + gap_x)
-            y = start_y - row * (btn_h + gap_y)
-
-            btn = AppKit.NSButton.alloc().initWithFrame_(
-                Foundation.NSMakeRect(x, y, btn_w, btn_h)
+            # ── 创建面板 ──
+            panel = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
+                Foundation.NSMakeRect(0, 0, panel_w, panel_h),
+                AppKit.NSTitledWindowMask | AppKit.NSClosableWindowMask,
+                AppKit.NSBackingStoreBuffered,
+                False,
             )
-            btn.setButtonType_(AppKit.NSButtonTypeSwitch)
-            btn.setTitle_(preset)
-            btn.setFont_(AppKit.NSFont.systemFontOfSize_(13))
-            content.addSubview_(btn)
-            toggle_buttons.append(btn)
+            panel.setTitle_("⏰ 时间记录")
+            panel.setFloatingPanel_(True)
+            panel.center()
+            panel.makeKeyAndOrderFront_(None)
 
-        # ── 自定义输入提示 ──
-        input_lbl = AppKit.NSTextField.alloc().initWithFrame_(
-            Foundation.NSMakeRect(20, 55, panel_w - 40, 18)
-        )
-        input_lbl.setStringValue_("自定义活动（多个用逗号分隔，每条最多20字）：")
-        input_lbl.setBezeled_(False)
-        input_lbl.setDrawsBackground_(False)
-        input_lbl.setEditable_(False)
-        input_lbl.setFont_(AppKit.NSFont.systemFontOfSize_(12))
-        input_lbl.setTextColor_(AppKit.NSColor.grayColor())
-        content.addSubview_(input_lbl)
+            content = panel.contentView()
 
-        # ── 自定义输入框 ──
-        input_field = AppKit.NSTextField.alloc().initWithFrame_(
-            Foundation.NSMakeRect(20, 20, panel_w - 40, 26)
-        )
-        input_field.setPlaceholderString_("例如：讨论方案, 写周报, 整理文档")
-        content.addSubview_(input_field)
+            # ── 标题 ──
+            title_lbl = AppKit.NSTextField.alloc().initWithFrame_(
+                Foundation.NSMakeRect(20, panel_h - 52, panel_w - 40, 28)
+            )
+            title_lbl.setStringValue_("现在在做什么？ 勾选预设 + 自定义输入")
+            title_lbl.setBezeled_(False)
+            title_lbl.setDrawsBackground_(False)
+            title_lbl.setEditable_(False)
+            title_lbl.setFont_(AppKit.NSFont.boldSystemFontOfSize_(14))
+            content.addSubview_(title_lbl)
 
-        # ── 操作按钮 ──
-        ok_btn = AppKit.NSButton.alloc().initWithFrame_(
-            Foundation.NSMakeRect(panel_w - 190, 6, 80, 26)
-        )
-        ok_btn.setTitle_("确认")
-        ok_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
-        ok_btn.setKeyEquivalent_("\r")
-        ok_btn.setTarget_(panel)
-        ok_btn.setAction_("stopModalWithCode:")
-        ok_btn.setTag_(1)
-        content.addSubview_(ok_btn)
+            # ── 预设复选框 ──
+            toggle_buttons = []
+            start_y = panel_h - 95
 
-        cancel_btn = AppKit.NSButton.alloc().initWithFrame_(
-            Foundation.NSMakeRect(panel_w - 100, 6, 80, 26)
-        )
-        cancel_btn.setTitle_("取消")
-        cancel_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
-        cancel_btn.setTarget_(panel)
-        cancel_btn.setAction_("stopModalWithCode:")
-        cancel_btn.setTag_(0)
-        content.addSubview_(cancel_btn)
+            for i, preset in enumerate(self.presets):
+                col = i % max_cols
+                row = i // max_cols
+                x = 20 + col * (btn_w + gap_x)
+                y = start_y - row * (btn_h + gap_y)
 
-        panel.setDefaultButtonCell_(ok_btn.cell())
-        panel.makeFirstResponder_(input_field)
+                btn = AppKit.NSButton.alloc().initWithFrame_(
+                    Foundation.NSMakeRect(x, y, btn_w, btn_h)
+                )
+                btn.setButtonType_(AppKit.NSButtonTypeSwitch)
+                btn.setTitle_(preset)
+                btn.setFont_(AppKit.NSFont.systemFontOfSize_(13))
+                content.addSubview_(btn)
+                toggle_buttons.append(btn)
 
-        # ── 模态运行 ──
-        result = AppKit.NSApplication.sharedApplication().runModalForWindow_(panel)
-        panel.orderOut_(None)
-        panel.release()
+            # ── 自定义输入 ──
+            input_lbl = AppKit.NSTextField.alloc().initWithFrame_(
+                Foundation.NSMakeRect(20, 55, panel_w - 40, 18)
+            )
+            input_lbl.setStringValue_("自定义活动（多个用逗号分隔，每条 ≤20 字）：")
+            input_lbl.setBezeled_(False)
+            input_lbl.setDrawsBackground_(False)
+            input_lbl.setEditable_(False)
+            input_lbl.setFont_(AppKit.NSFont.systemFontOfSize_(12))
+            input_lbl.setTextColor_(AppKit.NSColor.grayColor())
+            content.addSubview_(input_lbl)
 
-        if result == 1:
+            input_field = AppKit.NSTextField.alloc().initWithFrame_(
+                Foundation.NSMakeRect(20, 20, panel_w - 40, 26)
+            )
+            input_field.setPlaceholderString_("例如：讨论方案, 写周报, 整理文档")
+            content.addSubview_(input_field)
+
+            # ── 确认 / 取消 ──
+            ok_btn = AppKit.NSButton.alloc().initWithFrame_(
+                Foundation.NSMakeRect(panel_w - 190, 6, 80, 26)
+            )
+            ok_btn.setTitle_("确认")
+            ok_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
+            ok_btn.setKeyEquivalent_("\r")
+            ok_btn.setTarget_(panel)
+            ok_btn.setAction_("stopModalWithCode:")
+            ok_btn.setTag_(1)
+            content.addSubview_(ok_btn)
+
+            cancel_btn = AppKit.NSButton.alloc().initWithFrame_(
+                Foundation.NSMakeRect(panel_w - 100, 6, 80, 26)
+            )
+            cancel_btn.setTitle_("取消")
+            cancel_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
+            cancel_btn.setTarget_(panel)
+            cancel_btn.setAction_("stopModalWithCode:")
+            cancel_btn.setTag_(0)
+            content.addSubview_(cancel_btn)
+
+            panel.setDefaultButtonCell_(ok_btn.cell())
+            panel.makeFirstResponder_(input_field)
+
+            # ── 模态运行 ──
+            result = AppKit.NSApplication.sharedApplication().runModalForWindow_(panel)
+
+            # ── 先销毁面板，再处理结果（防止面板残留） ──
+            panel.orderOut_(None)
+            panel.release()
+            panel = None
+
+            if result != 1:
+                # 用户点了取消或关闭窗口
+                return True
+
+            # ── 收集勾选的预设 ──
             activities = []
-
             for btn in toggle_buttons:
-                if btn.state() == AppKit.NSControlStateValueOn:
-                    act = btn.title().strip()[:20]
-                    if act:
-                        activities.append(act)
+                try:
+                    state_val = btn.state()
+                    # state() 返回 0 (off), 1 (mixed), 1 (on) — 只取 on
+                    if state_val == 1 or state_val == AppKit.NSControlStateValueOn:
+                        act = btn.title().strip()[:20]
+                        if act:
+                            activities.append(act)
+                except Exception:
+                    pass  # 单个按钮读取出错，跳过
 
-            custom = input_field.stringValue().strip()
-            if custom:
-                for part in custom.replace("，", ",").split(","):
-                    part = part.strip()
-                    if part:
-                        activities.append(part[:20])
+            # ── 收集自定义输入 ──
+            try:
+                custom = input_field.stringValue().strip()
+                if custom:
+                    for part in custom.replace("，", ",").split(","):
+                        part = part.strip()
+                        if part:
+                            activities.append(part[:20])
+            except Exception:
+                pass
 
             if activities:
-                recorded = []
                 for act in activities:
                     self._record_activity(act)
-                    recorded.append(act)
-                rumps.notification(
-                    title="✅ 已记录",
-                    subtitle="、".join(recorded[:3]) + (f" 等 {len(recorded)} 项" if len(recorded) > 3 else ""),
-                    message="",
-                    sound=False,
-                )
-            else:
-                rumps.notification(
-                    title="⚠️ 未记录",
-                    subtitle="未选择任何活动",
-                    message="",
-                    sound=False,
-                )
+            return True
+
+        except Exception as e:
+            # 确保面板被销毁
+            if panel is not None:
+                try:
+                    panel.orderOut_(None)
+                    panel.release()
+                except Exception:
+                    pass
+            import sys as _sys
+            _sys.stderr.write(f"[TimeRecorder] NSPanel 回退: {e}\n")
+            return False
 
     def _show_fallback_dialog(self):
         """回退方案——使用 rumps.Window（文本输入模式）"""
