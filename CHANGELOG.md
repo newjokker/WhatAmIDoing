@@ -1,6 +1,16 @@
 # 变更日志
 
-## v1.3.0 (2026-06-10)
+## v1.3.1 (2026-06-10)
+
+### 修复
+- **闪退问题**：修复 `_try_panel_dialog` 中 `clear_btn` 引用顺序错误（`cb.clear_btn = clear_btn` 在 `clear_btn` 定义之前），导致 `NameError` 闪退
+- **「+ 添加」按钮无响应**：原来用普通 Python 函数作为 ObjC `action`，PyObjC 无法自动注册为 ObjC 消息，按钮点击无任何反应；改为在模块顶层定义 `_PanelButtonHandler(NSObject)` 子类，用 `addTask_` / `clearTasks_` 方法正确注册为 ObjC selector，`setup()` 方法用 `@objc.python_method` 标记以传递 Python 对象引用
+
+### 技术改进
+- ObjC handler 类改为模块级定义（只注册一次），每次弹窗时复用，避免运行时重复创建 ObjC 类导致崩溃
+- `_try_panel_dialog` 中移除重复的 `import objc`（已在模块顶层导入）
+
+
 
 ### 新增
 - **全新界面布局**：简洁面板，预设复选框 + 单独的自定义任务输入区

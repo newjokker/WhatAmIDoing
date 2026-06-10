@@ -13,7 +13,7 @@
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 __app_name__ = "⏰ 时间记录器"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
@@ -27,6 +27,47 @@ import subprocess
 import re
 import urllib.request
 import urllib.error
+
+# ═══════════════════════════════════════
+#  ObjC 面板回调处理类（模块级，只定义一次）
+# ═══════════════════════════════════════
+try:
+    import AppKit
+    import objc
+
+    class _PanelButtonHandler(AppKit.NSObject):
+        """持有 NSPanel 内 UI 元素引用，响应「+ 添加」和「清除」按钮点击"""
+
+        @objc.python_method
+        def setup(self, input_field, added_display, added_label, clear_btn, tasks_list):
+            self._input_field = input_field
+            self._added_display = added_display
+            self._added_label = added_label
+            self._clear_btn = clear_btn
+            self._tasks_list = tasks_list
+
+        def addTask_(self, sender):
+            """响应「+ 添加」按钮"""
+            name = self._input_field.stringValue().strip()
+            if name and len(name) <= 20 and name not in self._tasks_list:
+                self._tasks_list.append(name)
+                self._input_field.setStringValue_("")
+                self._added_display.setStringValue_("、".join(self._tasks_list))
+                self._added_display.setHidden_(False)
+                self._added_label.setHidden_(False)
+                self._clear_btn.setHidden_(False)
+
+        def clearTasks_(self, sender):
+            """响应「清除」按钮"""
+            del self._tasks_list[:]
+            self._added_display.setStringValue_("")
+            self._added_display.setHidden_(True)
+            self._added_label.setHidden_(True)
+            self._clear_btn.setHidden_(True)
+
+    _PANEL_HANDLER_CLS = _PanelButtonHandler
+except Exception:
+    _PANEL_HANDLER_CLS = None
 
 # ═══════════════════════════════════════
 #  默认配置
@@ -457,41 +498,27 @@ class TimeRecorder(rumps.App):
             input_field.setPlaceholderString_("输入任务名称")
             content.addSubview_(input_field)
 
-            # ── 自定义任务列表（用于按钮回调） ──
+            # ── 清除按钮（先创建，避免引用顺序问题） ──
+            clear_btn = AppKit.NSButton.alloc().initWithFrame_(
+                Foundation.NSMakeRect(panel_w - 250, input_section_y - 28, 55, 26)
+            )
+            clear_btn.setTitle_("清除")
+            clear_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
+            clear_btn.setHidden_(True)
+            content.addSubview_(clear_btn)
+
+            # ── 自定义任务列表 ──
             custom_tasks = []
 
-            class _Callbacks:
-                """按钮回调辅助类，持有对 UI 元素的引用"""
-                pass
+            # ── 用模块级 ObjC 类正确注册按钮回调 ──
+            if _PANEL_HANDLER_CLS is None:
+                raise RuntimeError("_PanelButtonHandler 未初始化，无法绑定按钮回调")
+            handler = _PANEL_HANDLER_CLS.alloc().init()
+            handler.setup(input_field, added_display, added_label, clear_btn, custom_tasks)
 
-            cb = _Callbacks()
-            cb.input_field = input_field
-            cb.added_display = added_display
-            cb.added_label = added_label
-            cb.tasks_list = custom_tasks
-            cb.clear_btn = clear_btn
-
-            def add_task(_sender):
-                name = cb.input_field.stringValue().strip()
-                if name and len(name) <= 20 and name not in cb.tasks_list:
-                    cb.tasks_list.append(name)
-                    cb.input_field.setStringValue_("")
-                    cb.added_display.setStringValue_("、".join(cb.tasks_list))
-                    cb.added_display.setHidden_(False)
-                    cb.added_label.setHidden_(False)
-                    cb.clear_btn.setHidden_(False)
-                    panel.makeFirstResponder_(cb.input_field)
-
-            def clear_tasks(_sender):
-                cb.tasks_list.clear()
-                cb.added_display.setStringValue_("")
-                cb.added_display.setHidden_(True)
-                cb.added_label.setHidden_(True)
-                cb.clear_btn.setHidden_(True)
-
-            # 保存回调引用防止被 GC
-            cb.add_task = add_task
-            cb.clear_tasks = clear_tasks
+            # 绑定清除按钮
+            clear_btn.setTarget_(handler)
+            clear_btn.setAction_("clearTasks:")
 
             # ── + 添加 按钮 ──
             add_btn = AppKit.NSButton.alloc().initWithFrame_(
@@ -499,20 +526,9 @@ class TimeRecorder(rumps.App):
             )
             add_btn.setTitle_("+ 添加")
             add_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
-            add_btn.setTarget_(cb)
-            add_btn.setAction_("add_task:")
+            add_btn.setTarget_(handler)
+            add_btn.setAction_("addTask:")
             content.addSubview_(add_btn)
-
-            # ── 清除按钮 ──
-            clear_btn = AppKit.NSButton.alloc().initWithFrame_(
-                Foundation.NSMakeRect(panel_w - 250, input_section_y - 28, 55, 26)
-            )
-            clear_btn.setTitle_("清除")
-            clear_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
-            clear_btn.setTarget_(cb)
-            clear_btn.setAction_("clear_tasks:")
-            clear_btn.setHidden_(True)
-            content.addSubview_(clear_btn)
 
             # ── 记录 / 取消 ──
             record_btn = AppKit.NSButton.alloc().initWithFrame_(
