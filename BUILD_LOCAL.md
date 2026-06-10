@@ -12,7 +12,7 @@
 | pip 路径 | `/Users/jokkerling/.workbuddy/binaries/python/envs/default/bin/pip` |
 | 依赖 | rumps, py2app |
 | 构建产物 | `dist/时间记录器.app`（arm64 原生） |
-| DMG 产物 | `releases/TimeRecorder-v{VERSION}.dmg` |
+| DMG 产物 | `releases/WhatAmIDoing-v{VERSION}.dmg` |
 
 ## 一次性环境准备
 

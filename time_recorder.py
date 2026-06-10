@@ -14,8 +14,8 @@
 
 __version__ = "1.0.0"
 __app_name__ = "⏰ 时间记录器"
-__repo_url__ = "https://github.com/newjokker/TimeRecorder"
-__github_api__ = "https://api.github.com/repos/newjokker/TimeRecorder/releases/latest"
+__repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
+__github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
 
 import rumps
 import json

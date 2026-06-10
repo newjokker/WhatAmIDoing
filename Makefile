@@ -51,15 +51,15 @@ dmg: app ## 构建 DMG 安装包
 	rm -f /tmp/timerecorder_template.dmg
 	@echo "✅ DMG 已生成: $(NAME).dmg"
 	@mkdir -p releases
-	@mv "$(NAME).dmg" "releases/TimeRecorder-v$(VERSION).dmg"
-	@echo "✅ 已移动到: releases/TimeRecorder-v$(VERSION).dmg"
+	@mv "$(NAME).dmg" "releases/WhatAmIDoing-v$(VERSION).dmg"
+	@echo "✅ 已移动到: releases/WhatAmIDoing-v$(VERSION).dmg"
 
 release: tag dmg ## 发布新版本（打标签 + 构建 DMG）
 	@echo "✅ Release v$(VERSION) 就绪！"
-	@echo "   DMG: releases/TimeRecorder-v$(VERSION).dmg"
+	@echo "   DMG: releases/WhatAmIDoing-v$(VERSION).dmg"
 	@echo "   在 GitHub 上创建 Release："
 	@echo "   1. git push --tags"
-	@echo "   2. gh release create v$(VERSION) releases/TimeRecorder-v$(VERSION).dmg --title 'v$(VERSION)' --notes-file CHANGELOG.md"
+	@echo "   2. gh release create v$(VERSION) releases/WhatAmIDoing-v$(VERSION).dmg --title 'v$(VERSION)' --notes-file CHANGELOG.md"
 
 tag: ## 打 Git 版本标签
 	@if git rev-parse v$(VERSION) >/dev/null 2>&1; then \

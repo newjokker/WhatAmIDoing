@@ -31,14 +31,14 @@ macOS 菜单栏活动记录器 — 定时提醒你记录当前在做什么。
 
 ### 下载 DMG
 
-从 [GitHub Releases](https://github.com/newjokker/TimeRecorder/releases) 下载最新 DMG 安装包。
+从 [GitHub Releases](https://github.com/newjokker/WhatAmIDoing/releases) 下载最新 DMG 安装包。
 
 ### 从源码构建
 
 ```bash
 # 克隆仓库
-git clone https://github.com/newjokker/TimeRecorder.git
-cd TimeRecorder
+git clone https://github.com/newjokker/WhatAmIDoing.git
+cd WhatAmIDoing
 
 # 安装依赖
 pip install rumps py2app
