@@ -1,0 +1,35 @@
+# ─── Python ───
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+*.so
+
+# ─── macOS ───
+.DS_Store
+._*
+*.icns
+*.iconset/
+
+# ─── IDE / Editor ───
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ─── Build Artifacts ───
+*.app/
+*.dmg
+releases/
+
+# ─── Runtime Config ───
+.time_recorder.json
+
+# ─── Virtual Environment ───
+venv/
+.env/
+.eggs/
+venv2/
