@@ -6,13 +6,14 @@
 功能:
     - 每 N 分钟（默认 5 分钟）弹窗询问"当前在做什么"
     - 检测电脑是否在使用中（空闲超过阈值则跳过，可关闭）
-    - 预设选项快速选择 + 自定义输入
+    - 预设选项以复选框按钮展现，点击勾选，支持多选
+    - 自定义输入支持逗号分隔多条活动，每条最多 20 字
     - 今日 / 本周 / 全部活动汇总
     - 自定义预设活动列表
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __app_name__ = "⏰ 时间记录器"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
@@ -338,48 +339,153 @@ class TimeRecorder(rumps.App):
                 self._show_recording_dialog()
 
     def _show_recording_dialog(self):
-        """弹出记录窗口，询问当前活动"""
+        """弹出自定义记录窗口——支持点击预设按钮 + 多活动记录"""
         self.recording_lock = True
         self.last_check_time = datetime.datetime.now().isoformat()
         self._save_config()
 
-        # 构建预设提示文本
-        preset_lines = []
-        for i, p in enumerate(self.presets):
-            preset_lines.append(f"  [{i+1}] {p}")
-        presets_hint = "\n".join(preset_lines)
+        import AppKit
 
-        win = rumps.Window(
-            title="⏰ 时间记录",
-            message=(
-                f"距离上次记录已过去 {self.interval_minutes} 分钟\n"
-                f"现在在做什么？\n\n"
-                f"📋 预设选项（输入数字快速选择）：\n"
-                f"{presets_hint}\n\n"
-                f"或直接输入自定义活动描述："
-            ),
-            default_text="",
-            dimensions=(400, 220),
-            cancel=True,
+        # ── 计算窗口尺寸 ──
+        max_cols = 3
+        btn_w, btn_h = 155, 26
+        gap_x, gap_y = 8, 6
+        rows = (len(self.presets) + max_cols - 1) // max_cols
+        content_w = 20 + max_cols * btn_w + (max_cols - 1) * gap_x + 20
+        btn_area_h = rows * btn_h + (rows - 1) * gap_y
+        panel_w = max(int(content_w), 480)
+        panel_h = 60 + 30 + btn_area_h + 60 + 28 + 8 + 28 + 8
+
+        # ── 创建浮动面板 ──
+        panel = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
+            AppKit.NSMakeRect(0, 0, panel_w, panel_h),
+            AppKit.NSTitledWindowMask | AppKit.NSClosableWindowMask,
+            AppKit.NSBackingStoreBuffered,
+            False,
         )
+        panel.setTitle_("⏰ 时间记录")
+        panel.setFloatingPanel_(True)
+        panel.center()
 
-        response = win.run()
-        if response.clicked:
-            text = response.text.strip()
-            if not text:
-                self.recording_lock = False
-                return
+        content = panel.contentView()
 
-            # 检测是否为预设编号
-            activity = text
-            if text.isdigit():
-                idx = int(text) - 1
-                if 0 <= idx < len(self.presets):
-                    activity = self.presets[idx]
+        # ── 标题 ──
+        title_lbl = AppKit.NSTextField.alloc().initWithFrame_(
+            AppKit.NSMakeRect(20, panel_h - 52, panel_w - 40, 28)
+        )
+        title_lbl.setStringValue_("现在在做什么？ 点击勾选，或输入自定义活动")
+        title_lbl.setBezeled_(False)
+        title_lbl.setDrawsBackground_(False)
+        title_lbl.setEditable_(False)
+        title_lbl.setFont_(AppKit.NSFont.boldSystemFontOfSize_(14))
+        content.addSubview_(title_lbl)
 
-            self._record_activity(activity)
-        # 取消弹窗 ⇒ 不记录，但 last_check_time 已更新（避免连续弹窗）
+        # ── 预设切换按钮（NSSwitchButton = 复选框样式） ──
+        toggle_buttons = []
+        start_y = panel_h - 95
 
+        for i, preset in enumerate(self.presets):
+            col = i % max_cols
+            row = i // max_cols
+            x = 20 + col * (btn_w + gap_x)
+            y = start_y - row * (btn_h + gap_y)
+
+            btn = AppKit.NSButton.alloc().initWithFrame_(
+                AppKit.NSMakeRect(x, y, btn_w, btn_h)
+            )
+            btn.setButtonType_(AppKit.NSSwitchButton)
+            btn.setTitle_(preset)
+            btn.setFont_(AppKit.NSFont.systemFontOfSize_(13))
+            content.addSubview_(btn)
+            toggle_buttons.append(btn)
+
+        # ── 自定义输入提示 ──
+        input_lbl = AppKit.NSTextField.alloc().initWithFrame_(
+            AppKit.NSMakeRect(20, 55, panel_w - 40, 18)
+        )
+        input_lbl.setStringValue_("自定义活动（多个用逗号分隔，每条最多20字）：")
+        input_lbl.setBezeled_(False)
+        input_lbl.setDrawsBackground_(False)
+        input_lbl.setEditable_(False)
+        input_lbl.setFont_(AppKit.NSFont.systemFontOfSize_(12))
+        input_lbl.setTextColor_(AppKit.NSColor.grayColor())
+        content.addSubview_(input_lbl)
+
+        # ── 自定义输入框 ──
+        input_field = AppKit.NSTextField.alloc().initWithFrame_(
+            AppKit.NSMakeRect(20, 20, panel_w - 40, 26)
+        )
+        input_field.setPlaceholderString_("例如：讨论方案, 写周报, 整理文档")
+        content.addSubview_(input_field)
+
+        # ── 操作按钮 ──
+        ok_btn = AppKit.NSButton.alloc().initWithFrame_(
+            AppKit.NSMakeRect(panel_w - 190, 6, 80, 26)
+        )
+        ok_btn.setTitle_("确认")
+        ok_btn.setBezelStyle_(AppKit.NSRoundedBezelStyle)
+        ok_btn.setKeyEquivalent_("\r")  # Enter 键
+        ok_btn.setTarget_(panel)
+        ok_btn.setAction_("stopModalWithCode:")
+        ok_btn.tag = 1
+        content.addSubview_(ok_btn)
+
+        cancel_btn = AppKit.NSButton.alloc().initWithFrame_(
+            AppKit.NSMakeRect(panel_w - 100, 6, 80, 26)
+        )
+        cancel_btn.setTitle_("取消")
+        cancel_btn.setBezelStyle_(AppKit.NSRoundedBezelStyle)
+        cancel_btn.setTarget_(panel)
+        cancel_btn.setAction_("stopModalWithCode:")
+        cancel_btn.tag = 0
+        content.addSubview_(cancel_btn)
+
+        panel.setDefaultButtonCell_(ok_btn.cell())
+        panel.makeFirstResponder_(input_field)
+
+        # ── 模态运行 ──
+        result = AppKit.NSApplication.sharedApplication().runModalForWindow_(panel)
+        panel.orderOut_(None)
+
+        if result == 1:
+            activities = []
+
+            # 收集勾选的预设
+            for btn in toggle_buttons:
+                if btn.state() == AppKit.NSOnState:
+                    act = btn.title().strip()[:20]
+                    if act:
+                        activities.append(act)
+
+            # 收集自定义输入（逗号分隔、去重）
+            custom = input_field.stringValue().strip()
+            if custom:
+                for part in custom.replace("，", ",").split(","):
+                    part = part.strip()
+                    if part:
+                        activities.append(part[:20])
+
+            # 逐一记录
+            if activities:
+                recorded = []
+                for act in activities:
+                    self._record_activity(act)
+                    recorded.append(act)
+                rumps.notification(
+                    title="✅ 已记录",
+                    subtitle="、".join(recorded[:3]) + (f" 等 {len(recorded)} 项" if len(recorded) > 3 else ""),
+                    message="",
+                    sound=False,
+                )
+            else:
+                rumps.notification(
+                    title="⚠️ 未记录",
+                    subtitle="未选择任何活动",
+                    message="",
+                    sound=False,
+                )
+
+        panel.release()
         self.recording_lock = False
 
     def trigger_record(self, _):
