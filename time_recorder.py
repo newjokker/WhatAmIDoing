@@ -6,14 +6,13 @@
 功能:
     - 每 N 分钟（默认 5 分钟）弹窗询问"当前在做什么"
     - 检测电脑是否在使用中（空闲超过阈值则跳过，可关闭）
-    - 预设选项以复选框按钮展现，点击勾选，支持多选
-    - 自定义输入支持逗号分隔多条活动，每条最多 20 字
+    - 简化弹窗：点击预设即记录，或输入自定义活动
     - 今日 / 本周 / 全部活动汇总
     - 自定义预设活动列表
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.3.1"
+__version__ = "1.4.0"
 __app_name__ = "⏰ 时间记录器"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
@@ -35,37 +34,33 @@ try:
     import AppKit
     import objc
 
-    class _PanelButtonHandler(AppKit.NSObject):
-        """持有 NSPanel 内 UI 元素引用，响应「+ 添加」和「清除」按钮点击"""
+    class _SimplePanelHandler(AppKit.NSObject):
+        """简化面板按钮回调：点击预设即记录，自定义输入后点记录"""
 
         @objc.python_method
-        def setup(self, input_field, added_display, added_label, clear_btn, tasks_list):
+        def setup(self, input_field, result_list):
             self._input_field = input_field
-            self._added_display = added_display
-            self._added_label = added_label
-            self._clear_btn = clear_btn
-            self._tasks_list = tasks_list
+            self._result_list = result_list
 
-        def addTask_(self, sender):
-            """响应「+ 添加」按钮"""
-            name = self._input_field.stringValue().strip()
-            if name and len(name) <= 20 and name not in self._tasks_list:
-                self._tasks_list.append(name)
-                self._input_field.setStringValue_("")
-                self._added_display.setStringValue_("、".join(self._tasks_list))
-                self._added_display.setHidden_(False)
-                self._added_label.setHidden_(False)
-                self._clear_btn.setHidden_(False)
+        def presetClicked_(self, sender):
+            """点击预设按钮 → 立即记录该活动并关闭"""
+            name = sender.title().strip()[:20]
+            if name:
+                self._result_list.append(name)
+            AppKit.NSApplication.sharedApplication().stopModalWithCode_(1)
 
-        def clearTasks_(self, sender):
-            """响应「清除」按钮"""
-            del self._tasks_list[:]
-            self._added_display.setStringValue_("")
-            self._added_display.setHidden_(True)
-            self._added_label.setHidden_(True)
-            self._clear_btn.setHidden_(True)
+        def recordClicked_(self, sender):
+            """点击记录按钮 → 记录自定义输入，空输入则跳过"""
+            text = self._input_field.stringValue().strip()[:20]
+            if text:
+                self._result_list.append(text)
+            AppKit.NSApplication.sharedApplication().stopModalWithCode_(1)
 
-    _PANEL_HANDLER_CLS = _PanelButtonHandler
+        def skipClicked_(self, sender):
+            """点击跳过按钮"""
+            AppKit.NSApplication.sharedApplication().stopModalWithCode_(0)
+
+    _PANEL_HANDLER_CLS = _SimplePanelHandler
 except Exception:
     _PANEL_HANDLER_CLS = None
 
@@ -380,19 +375,19 @@ class TimeRecorder(rumps.App):
                 self._show_recording_dialog()
 
     def _show_recording_dialog(self):
-        """弹出自定义记录窗口——支持点击预设按钮 + 多活动记录"""
+        """弹出记录窗口——简化版：点击预设即记录"""
         self.recording_lock = True
         self.last_check_time = datetime.datetime.now().isoformat()
         self._save_config()
 
-        # 尝试原生面板，失败或不可用时回退到文本对话框
+        # 尝试原生面板，失败时回退到文本对话框
         if not self._try_panel_dialog():
             self._show_fallback_dialog()
 
         self.recording_lock = False
 
     def _try_panel_dialog(self):
-        """原生 Cocoa 面板——预设复选框 + 自定义任务添加。
+        """简化版原生面板——点击预设即记录，或输入自定义活动。
         返回 True 表示成功完成，False 表示失败需回退。"""
         import AppKit
         import Foundation
@@ -401,13 +396,14 @@ class TimeRecorder(rumps.App):
         try:
             # ── 布局计算 ──
             max_cols = 3
-            btn_w, btn_h = 115, 24
-            gap_x, gap_y = 10, 8
+            btn_w, btn_h = 110, 30
+            gap_x, gap_y = 8, 8
             rows = (len(self.presets) + max_cols - 1) // max_cols
-            preset_h = rows * btn_h + (rows - 1) * gap_y
+            preset_h = rows * btn_h + max(0, rows - 1) * gap_y
 
-            panel_w = 420
-            panel_h = int(155 + preset_h + 30)  # 标题 + 预设 + 输入 + 按钮
+            panel_w = 380
+            # 标题 50 + 预设区 + 间距 12 + 分隔线 2 + 间距 6 + 输入 30 + 间距 12 + 按钮 36
+            panel_h = int(50 + preset_h + 12 + 2 + 6 + 30 + 12 + 36)
 
             # ── 创建面板 ──
             panel = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -425,7 +421,7 @@ class TimeRecorder(rumps.App):
 
             # ── 标题 ──
             title_lbl = AppKit.NSTextField.alloc().initWithFrame_(
-                Foundation.NSMakeRect(20, panel_h - 45, panel_w - 40, 28)
+                Foundation.NSMakeRect(20, panel_h - 42, panel_w - 40, 24)
             )
             title_lbl.setStringValue_("现在在做什么？")
             title_lbl.setBezeled_(False)
@@ -434,9 +430,11 @@ class TimeRecorder(rumps.App):
             title_lbl.setFont_(AppKit.NSFont.boldSystemFontOfSize_(15))
             content.addSubview_(title_lbl)
 
-            # ── 预设复选框 ──
-            toggle_buttons = []
-            preset_start_y = panel_h - 85
+            # ── 预设按钮（点击即记录） ──
+            preset_start_y = panel_h - 74
+            result_list = []
+
+            handler = _SimplePanelHandler.alloc().init()
 
             for i, preset in enumerate(self.presets):
                 col = i % max_cols
@@ -447,144 +445,68 @@ class TimeRecorder(rumps.App):
                 btn = AppKit.NSButton.alloc().initWithFrame_(
                     Foundation.NSMakeRect(x, y, btn_w, btn_h)
                 )
-                btn.setButtonType_(AppKit.NSButtonTypeSwitch)
                 btn.setTitle_(preset)
+                btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
                 btn.setFont_(AppKit.NSFont.systemFontOfSize_(13))
+                btn.setTarget_(handler)
+                btn.setAction_("presetClicked:")
                 content.addSubview_(btn)
-                toggle_buttons.append(btn)
 
-            # ── 已添加任务区域 ──
-            input_section_y = preset_start_y - preset_h - 18
-
-            added_label = AppKit.NSTextField.alloc().initWithFrame_(
-                Foundation.NSMakeRect(20, input_section_y + 28, 60, 18)
+            # ── 分隔线 ──
+            sep_y = preset_start_y - preset_h - 6
+            sep = AppKit.NSBox.alloc().initWithFrame_(
+                Foundation.NSMakeRect(20, sep_y, panel_w - 40, 1)
             )
-            added_label.setStringValue_("已添加：")
-            added_label.setBezeled_(False)
-            added_label.setDrawsBackground_(False)
-            added_label.setEditable_(False)
-            added_label.setFont_(AppKit.NSFont.systemFontOfSize_(11))
-            added_label.setTextColor_(AppKit.NSColor.grayColor())
-            added_label.setHidden_(True)
-            content.addSubview_(added_label)
+            sep.setBoxType_(AppKit.NSBoxSeparator)
+            content.addSubview_(sep)
 
-            added_display = AppKit.NSTextField.alloc().initWithFrame_(
-                Foundation.NSMakeRect(70, input_section_y + 26, panel_w - 90, 22)
-            )
-            added_display.setStringValue_("")
-            added_display.setBezeled_(False)
-            added_display.setDrawsBackground_(False)
-            added_display.setEditable_(False)
-            added_display.setFont_(AppKit.NSFont.systemFontOfSize_(12))
-            added_display.setLineBreakMode_(AppKit.NSLineBreakByTruncatingTail)
-            added_display.setHidden_(True)
-            content.addSubview_(added_display)
-
-            # ── 自定义任务输入 ──
-            input_lbl = AppKit.NSTextField.alloc().initWithFrame_(
-                Foundation.NSMakeRect(20, input_section_y, panel_w - 40, 18)
-            )
-            input_lbl.setStringValue_("新任务（≤20 字）：")
-            input_lbl.setBezeled_(False)
-            input_lbl.setDrawsBackground_(False)
-            input_lbl.setEditable_(False)
-            input_lbl.setFont_(AppKit.NSFont.systemFontOfSize_(11))
-            input_lbl.setTextColor_(AppKit.NSColor.grayColor())
-            content.addSubview_(input_lbl)
-
+            # ── 自定义输入 ──
+            input_y = sep_y - 32
             input_field = AppKit.NSTextField.alloc().initWithFrame_(
-                Foundation.NSMakeRect(20, input_section_y - 28, panel_w - 140, 26)
+                Foundation.NSMakeRect(20, input_y, panel_w - 40, 26)
             )
-            input_field.setPlaceholderString_("输入任务名称")
+            input_field.setPlaceholderString_("输入自定义活动…")
             content.addSubview_(input_field)
 
-            # ── 清除按钮（先创建，避免引用顺序问题） ──
-            clear_btn = AppKit.NSButton.alloc().initWithFrame_(
-                Foundation.NSMakeRect(panel_w - 250, input_section_y - 28, 55, 26)
-            )
-            clear_btn.setTitle_("清除")
-            clear_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
-            clear_btn.setHidden_(True)
-            content.addSubview_(clear_btn)
+            # 绑定 handler
+            handler.setup(input_field, result_list)
 
-            # ── 自定义任务列表 ──
-            custom_tasks = []
-
-            # ── 用模块级 ObjC 类正确注册按钮回调 ──
-            if _PANEL_HANDLER_CLS is None:
-                raise RuntimeError("_PanelButtonHandler 未初始化，无法绑定按钮回调")
-            handler = _PANEL_HANDLER_CLS.alloc().init()
-            handler.setup(input_field, added_display, added_label, clear_btn, custom_tasks)
-
-            # 绑定清除按钮
-            clear_btn.setTarget_(handler)
-            clear_btn.setAction_("clearTasks:")
-
-            # ── + 添加 按钮 ──
-            add_btn = AppKit.NSButton.alloc().initWithFrame_(
-                Foundation.NSMakeRect(panel_w - 112, input_section_y - 28, 92, 26)
-            )
-            add_btn.setTitle_("+ 添加")
-            add_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
-            add_btn.setTarget_(handler)
-            add_btn.setAction_("addTask:")
-            content.addSubview_(add_btn)
-
-            # ── 记录 / 取消 ──
+            # ── 记录按钮（蓝色风格） ──
             record_btn = AppKit.NSButton.alloc().initWithFrame_(
-                Foundation.NSMakeRect(panel_w - 190, 8, 80, 28)
+                Foundation.NSMakeRect(panel_w - 180, 10, 80, 28)
             )
             record_btn.setTitle_("记录")
             record_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
+            record_btn.setFont_(AppKit.NSFont.boldSystemFontOfSize_(13))
             record_btn.setKeyEquivalent_("\r")
-            record_btn.setTarget_(panel)
-            record_btn.setAction_("stopModalWithCode:")
-            record_btn.setTag_(1)
+            record_btn.setTarget_(handler)
+            record_btn.setAction_("recordClicked:")
             content.addSubview_(record_btn)
 
-            cancel_btn = AppKit.NSButton.alloc().initWithFrame_(
-                Foundation.NSMakeRect(panel_w - 100, 8, 80, 28)
+            # ── 跳过按钮 ──
+            skip_btn = AppKit.NSButton.alloc().initWithFrame_(
+                Foundation.NSMakeRect(panel_w - 90, 10, 70, 28)
             )
-            cancel_btn.setTitle_("取消")
-            cancel_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
-            cancel_btn.setTarget_(panel)
-            cancel_btn.setAction_("stopModalWithCode:")
-            cancel_btn.setTag_(0)
-            content.addSubview_(cancel_btn)
+            skip_btn.setTitle_("跳过")
+            skip_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
+            skip_btn.setFont_(AppKit.NSFont.systemFontOfSize_(13))
+            skip_btn.setTarget_(handler)
+            skip_btn.setAction_("skipClicked:")
+            content.addSubview_(skip_btn)
 
-            panel.setDefaultButtonCell_(record_btn.cell())
+            # 默认焦点在输入框
             panel.makeFirstResponder_(input_field)
 
             # ── 模态运行 ──
             result = AppKit.NSApplication.sharedApplication().runModalForWindow_(panel)
 
-            # 先销毁面板再处理结果
+            # 销毁面板
             panel.orderOut_(None)
             panel.release()
             panel = None
 
-            if result != 1:
-                return True
-
-            # ── 收集勾选的预设 ──
-            activities = []
-            for btn in toggle_buttons:
-                try:
-                    if btn.state() in (1, AppKit.NSControlStateValueOn):
-                        act = btn.title().strip()[:20]
-                        if act:
-                            activities.append(act)
-                except Exception:
-                    pass
-
-            # ── 收集自定义任务 ──
-            for t in custom_tasks:
-                t = t.strip()[:20]
-                if t and t not in activities:
-                    activities.append(t)
-
-            if activities:
-                for act in activities:
+            if result == 1 and result_list:
+                for act in result_list:
                     self._record_activity(act)
             return True
 
