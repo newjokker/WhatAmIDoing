@@ -23,7 +23,7 @@ OPTIONS = {
     },
     "packages": ["rumps"],
     "frameworks": ["/opt/miniconda3/lib/libffi.8.dylib"],
-    "includes": ["ctypes"],
+    "includes": ["ctypes", "AppKit", "Foundation", "objc"],
     "dylib_excludes": [],
 }
 

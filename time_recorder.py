@@ -13,7 +13,7 @@
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 __app_name__ = "⏰ 时间记录器"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
@@ -344,9 +344,24 @@ class TimeRecorder(rumps.App):
         self.last_check_time = datetime.datetime.now().isoformat()
         self._save_config()
 
-        import AppKit
+        try:
+            self._show_panel_dialog()
+        except Exception as e:
+            # NSPanel 失败时回退到 rumps.Window
+            rumps.notification(
+                title="⚠️ 面板加载失败",
+                subtitle=f"{e}",
+                message="回退到文本模式",
+                sound=False,
+            )
+            self._show_fallback_dialog()
+        self.recording_lock = False
 
-        # ── 计算窗口尺寸 ──
+    def _show_panel_dialog(self):
+        """原生 Cocoa 面板对话框（复选框按钮 + 自定义输入）"""
+        import AppKit
+        import Foundation
+
         max_cols = 3
         btn_w, btn_h = 155, 26
         gap_x, gap_y = 8, 6
@@ -356,9 +371,8 @@ class TimeRecorder(rumps.App):
         panel_w = max(int(content_w), 480)
         panel_h = 60 + 30 + btn_area_h + 60 + 28 + 8 + 28 + 8
 
-        # ── 创建浮动面板 ──
         panel = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            AppKit.NSMakeRect(0, 0, panel_w, panel_h),
+            Foundation.NSMakeRect(0, 0, panel_w, panel_h),
             AppKit.NSTitledWindowMask | AppKit.NSClosableWindowMask,
             AppKit.NSBackingStoreBuffered,
             False,
@@ -366,12 +380,13 @@ class TimeRecorder(rumps.App):
         panel.setTitle_("⏰ 时间记录")
         panel.setFloatingPanel_(True)
         panel.center()
+        panel.makeKeyAndOrderFront_(None)
 
         content = panel.contentView()
 
         # ── 标题 ──
         title_lbl = AppKit.NSTextField.alloc().initWithFrame_(
-            AppKit.NSMakeRect(20, panel_h - 52, panel_w - 40, 28)
+            Foundation.NSMakeRect(20, panel_h - 52, panel_w - 40, 28)
         )
         title_lbl.setStringValue_("现在在做什么？ 点击勾选，或输入自定义活动")
         title_lbl.setBezeled_(False)
@@ -380,7 +395,7 @@ class TimeRecorder(rumps.App):
         title_lbl.setFont_(AppKit.NSFont.boldSystemFontOfSize_(14))
         content.addSubview_(title_lbl)
 
-        # ── 预设切换按钮（NSSwitchButton = 复选框样式） ──
+        # ── 预设切换按钮 ──
         toggle_buttons = []
         start_y = panel_h - 95
 
@@ -391,9 +406,9 @@ class TimeRecorder(rumps.App):
             y = start_y - row * (btn_h + gap_y)
 
             btn = AppKit.NSButton.alloc().initWithFrame_(
-                AppKit.NSMakeRect(x, y, btn_w, btn_h)
+                Foundation.NSMakeRect(x, y, btn_w, btn_h)
             )
-            btn.setButtonType_(AppKit.NSSwitchButton)
+            btn.setButtonType_(AppKit.NSButtonTypeSwitch)
             btn.setTitle_(preset)
             btn.setFont_(AppKit.NSFont.systemFontOfSize_(13))
             content.addSubview_(btn)
@@ -401,7 +416,7 @@ class TimeRecorder(rumps.App):
 
         # ── 自定义输入提示 ──
         input_lbl = AppKit.NSTextField.alloc().initWithFrame_(
-            AppKit.NSMakeRect(20, 55, panel_w - 40, 18)
+            Foundation.NSMakeRect(20, 55, panel_w - 40, 18)
         )
         input_lbl.setStringValue_("自定义活动（多个用逗号分隔，每条最多20字）：")
         input_lbl.setBezeled_(False)
@@ -413,28 +428,28 @@ class TimeRecorder(rumps.App):
 
         # ── 自定义输入框 ──
         input_field = AppKit.NSTextField.alloc().initWithFrame_(
-            AppKit.NSMakeRect(20, 20, panel_w - 40, 26)
+            Foundation.NSMakeRect(20, 20, panel_w - 40, 26)
         )
         input_field.setPlaceholderString_("例如：讨论方案, 写周报, 整理文档")
         content.addSubview_(input_field)
 
         # ── 操作按钮 ──
         ok_btn = AppKit.NSButton.alloc().initWithFrame_(
-            AppKit.NSMakeRect(panel_w - 190, 6, 80, 26)
+            Foundation.NSMakeRect(panel_w - 190, 6, 80, 26)
         )
         ok_btn.setTitle_("确认")
-        ok_btn.setBezelStyle_(AppKit.NSRoundedBezelStyle)
-        ok_btn.setKeyEquivalent_("\r")  # Enter 键
+        ok_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
+        ok_btn.setKeyEquivalent_("\r")
         ok_btn.setTarget_(panel)
         ok_btn.setAction_("stopModalWithCode:")
         ok_btn.tag = 1
         content.addSubview_(ok_btn)
 
         cancel_btn = AppKit.NSButton.alloc().initWithFrame_(
-            AppKit.NSMakeRect(panel_w - 100, 6, 80, 26)
+            Foundation.NSMakeRect(panel_w - 100, 6, 80, 26)
         )
         cancel_btn.setTitle_("取消")
-        cancel_btn.setBezelStyle_(AppKit.NSRoundedBezelStyle)
+        cancel_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
         cancel_btn.setTarget_(panel)
         cancel_btn.setAction_("stopModalWithCode:")
         cancel_btn.tag = 0
@@ -446,18 +461,17 @@ class TimeRecorder(rumps.App):
         # ── 模态运行 ──
         result = AppKit.NSApplication.sharedApplication().runModalForWindow_(panel)
         panel.orderOut_(None)
+        panel.release()
 
         if result == 1:
             activities = []
 
-            # 收集勾选的预设
             for btn in toggle_buttons:
-                if btn.state() == AppKit.NSOnState:
+                if btn.state() == AppKit.NSControlStateValueOn:
                     act = btn.title().strip()[:20]
                     if act:
                         activities.append(act)
 
-            # 收集自定义输入（逗号分隔、去重）
             custom = input_field.stringValue().strip()
             if custom:
                 for part in custom.replace("，", ",").split(","):
@@ -465,7 +479,6 @@ class TimeRecorder(rumps.App):
                     if part:
                         activities.append(part[:20])
 
-            # 逐一记录
             if activities:
                 recorded = []
                 for act in activities:
@@ -485,8 +498,48 @@ class TimeRecorder(rumps.App):
                     sound=False,
                 )
 
-        panel.release()
-        self.recording_lock = False
+    def _show_fallback_dialog(self):
+        """回退方案——使用 rumps.Window（文本输入模式）"""
+        preset_lines = []
+        for i, p in enumerate(self.presets):
+            preset_lines.append(f"  [{i+1}] {p}")
+        presets_hint = "\n".join(preset_lines)
+
+        win = rumps.Window(
+            title="⏰ 时间记录",
+            message=(
+                f"距离上次记录已过去 {self.interval_minutes} 分钟\n"
+                f"现在在做什么？多个活动用逗号分隔\n\n"
+                f"📋 预设选项（输入数字快速选择）：\n"
+                f"{presets_hint}\n\n"
+                f"或直接输入自定义活动："
+            ),
+            default_text="",
+            dimensions=(400, 220),
+            cancel=True,
+        )
+
+        response = win.run()
+        if response.clicked:
+            text = response.text.strip()
+            if not text:
+                return
+
+            activities = []
+            for part in text.replace("，", ",").split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                # 检测是否为预设编号
+                activity = part
+                if part.isdigit():
+                    idx = int(part) - 1
+                    if 0 <= idx < len(self.presets):
+                        activity = self.presets[idx]
+                activities.append(activity[:20])
+
+            for act in activities:
+                self._record_activity(act)
 
     def trigger_record(self, _):
         """手动触发立即记录"""

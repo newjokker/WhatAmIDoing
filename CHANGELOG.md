@@ -1,5 +1,14 @@
 # 变更日志
 
+## v1.2.1 (2026-06-10)
+
+### 修复
+- **修复打包后无弹窗问题**：NSPanel 改用 `NSButtonTypeSwitch` / `NSBezelStyleRounded` 等新 API 常量名
+- 增加 `AppKit`、`Foundation`、`objc` 到 py2app 的显式 includes，确保打包时模块完整
+- `_show_recording_dialog` 增加 try/except，NSPanel 出错时自动回退到文本输入模式
+- 回退方案同样支持逗号分隔多活动记录
+- 分离为 `_show_panel_dialog`（原生面板）和 `_show_fallback_dialog`（rumps.Window）两个方法
+
 ## v1.2.0 (2026-06-10)
 
 ### 新增
