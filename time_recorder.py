@@ -12,7 +12,7 @@
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.4.3"
+__version__ = "1.4.4"
 __app_name__ = "⏰ 时间记录器"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
@@ -56,6 +56,10 @@ try:
             """关闭统计窗口"""
             AppKit.NSApplication.sharedApplication().stopModalWithCode_(0)
 
+        def windowWillClose_(self, notification):
+            """用户点窗口关闭按钮时也要结束模态，否则菜单栏会像卡死一样不可点。"""
+            AppKit.NSApplication.sharedApplication().stopModalWithCode_(0)
+
     _PANEL_HANDLER_CLS = _SimplePanelHandler
 except Exception:
     _PANEL_HANDLER_CLS = None
@@ -67,7 +71,7 @@ DEFAULT_INTERVAL = 5           # 弹窗间隔（分钟，默认 5min 方便测�
 DEFAULT_IDLE_THRESHOLD = 5     # 空闲阈值（分钟），超过此值视为电脑无人使用
 DEFAULT_PRESETS = ["写代码", "开会", "阅读", "学习", "思考", "摸鱼"]
 MAX_ACTIVITY_LENGTH = 20
-MAX_PRESETS = 20
+MAX_PRESETS = 12
 
 CONFIG_DIR = os.path.expanduser("~")
 CONFIG_FILE = os.path.join(CONFIG_DIR, ".time_recorder.json")
@@ -148,6 +152,20 @@ def install_exception_logging():
 def normalize_activity_name(text):
     """清洗单条活动名称，返回最多 MAX_ACTIVITY_LENGTH 个字符。"""
     return re.sub(r"\s+", " ", str(text or "").strip())[:MAX_ACTIVITY_LENGTH]
+
+
+def normalize_presets(presets, limit=MAX_PRESETS):
+    """清洗预设列表：去空、去重、限制数量。"""
+    cleaned = []
+    seen = set()
+    for preset in presets or []:
+        name = normalize_activity_name(preset)
+        if name and name not in seen:
+            cleaned.append(name)
+            seen.add(name)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
 
 
 def parse_activity_input(text, presets):
@@ -247,10 +265,12 @@ class TimeRecorder(rumps.App):
         config = self._load_config()
 
         # ── 状态 ──
-        self.timer = rumps.Timer(self.on_tick, 1)
+        self.timer = rumps.Timer(self._safe_on_tick, 1)
         self.interval_minutes = config.get("interval_minutes", DEFAULT_INTERVAL)
         self.idle_threshold_minutes = config.get("idle_threshold_minutes", DEFAULT_IDLE_THRESHOLD)
-        self.presets = config.get("presets", list(DEFAULT_PRESETS))
+        self.presets = normalize_presets(config.get("presets", DEFAULT_PRESETS))
+        if not self.presets:
+            self.presets = list(DEFAULT_PRESETS)
         self.last_check_time = config.get("last_check_time", None)
         self.activities = config.get("activities", [])
         self.recording_lock = False  # 防止重复弹窗
@@ -281,6 +301,9 @@ class TimeRecorder(rumps.App):
 
     def _save_config(self):
         """原子写入配置"""
+        self.presets = normalize_presets(self.presets)
+        if not self.presets:
+            self.presets = list(DEFAULT_PRESETS)
         config = {
             "interval_minutes": self.interval_minutes,
             "idle_threshold_minutes": self.idle_threshold_minutes,
@@ -304,6 +327,20 @@ class TimeRecorder(rumps.App):
             log_exception("保存配置失败", e)
             pass
 
+    def _menu_callback(self, label, callback):
+        """包一层菜单回调，避免 rumps 静默吞掉异常。"""
+        def _wrapped(sender):
+            try:
+                return callback(sender)
+            except Exception as e:
+                log_exception(f"菜单操作失败: {label}", e)
+                safe_alert(
+                    title="操作失败",
+                    message=f"「{label}」执行失败，详情已写入错误日志。",
+                )
+                return None
+        return _wrapped
+
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     #  菜单构建
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -311,15 +348,15 @@ class TimeRecorder(rumps.App):
     def _build_menu(self):
         """组装菜单结构"""
         # ── 立即记录 ──
-        self.check_now_item = rumps.MenuItem("🔍 立即记录", callback=self.trigger_record)
+        self.check_now_item = rumps.MenuItem("🔍 立即记录", callback=self._menu_callback("立即记录", self.trigger_record))
 
         # ── 上次活动 ──
         self.last_activity_item = rumps.MenuItem("⏳ 暂无记录", callback=None)
 
         # ── 汇总菜单 ──
-        self.today_item = rumps.MenuItem("📅 今日汇总", callback=self.show_today_summary)
-        self.week_item = rumps.MenuItem("📆 本周汇总", callback=self.show_week_summary)
-        self.all_item = rumps.MenuItem("📊 全部记录", callback=self.show_all_summary)
+        self.today_item = rumps.MenuItem("📅 今日汇总", callback=self._menu_callback("今日汇总", self.show_today_summary))
+        self.week_item = rumps.MenuItem("📆 本周汇总", callback=self._menu_callback("本周汇总", self.show_week_summary))
+        self.all_item = rumps.MenuItem("📊 全部记录", callback=self._menu_callback("全部记录", self.show_all_summary))
 
         # ── 设置子菜单 ──
         self.settings_menu = rumps.MenuItem("⚙ 设置")
@@ -342,15 +379,15 @@ class TimeRecorder(rumps.App):
         self.settings_menu.add(self.presets_submenu)
 
         # 错误日志
-        self.logs_item = rumps.MenuItem("🧾 打开错误日志文件夹", callback=self.open_error_logs)
+        self.logs_item = rumps.MenuItem("🧾 打开错误日志文件夹", callback=self._menu_callback("打开错误日志文件夹", self.open_error_logs))
 
         # ── 检查更新 ──
-        self.update_item = rumps.MenuItem("🔄 检查更新", callback=self.check_update)
+        self.update_item = rumps.MenuItem("🔄 检查更新", callback=self._menu_callback("检查更新", self.check_update))
 
         # ── 测试工具（开发用） ──
         self.test_menu = rumps.MenuItem("🧪 测试")
-        reset_timer = rumps.MenuItem("⏱ 重置计时器（下次立即弹窗）", callback=self._reset_timer)
-        clear_acts = rumps.MenuItem("🗑 清空全部记录", callback=self._clear_all_activities)
+        reset_timer = rumps.MenuItem("⏱ 重置计时器（下次立即弹窗）", callback=self._menu_callback("重置计时器", self._reset_timer))
+        clear_acts = rumps.MenuItem("🗑 清空全部记录", callback=self._menu_callback("清空全部记录", self._clear_all_activities))
         self.test_menu.add(reset_timer)
         self.test_menu.add(clear_acts)
 
@@ -369,9 +406,9 @@ class TimeRecorder(rumps.App):
             self.logs_item,
             self.update_item,
             None,
-            rumps.MenuItem("❓ 关于", callback=self.show_about),
+            rumps.MenuItem("❓ 关于", callback=self._menu_callback("关于", self.show_about)),
             None,
-            rumps.MenuItem("🚪 退出", callback=self.quit_app),
+            rumps.MenuItem("🚪 退出", callback=self._menu_callback("退出", self.quit_app)),
         ]
 
         self._update_last_activity()
@@ -380,7 +417,7 @@ class TimeRecorder(rumps.App):
         """为子菜单添加时长选项列表"""
         for v in values:
             label = "关闭（始终弹窗）" if v == 0 else f"{v} 分钟"
-            item = rumps.MenuItem(label, callback=callback)
+            item = rumps.MenuItem(label, callback=self._menu_callback(label, callback))
             item.state = (v == current_value)
             item._setting_value = v
             parent.add(item)
@@ -414,7 +451,10 @@ class TimeRecorder(rumps.App):
 
         # 添加预设选项
         for i, preset in enumerate(self.presets):
-            item = rumps.MenuItem(f"  {preset}", callback=self._on_delete_preset)
+            item = rumps.MenuItem(
+                f"删除「{preset}」",
+                callback=self._menu_callback(f"删除预设 {preset}", self._on_delete_preset),
+            )
             item._preset_index = i
             self.presets_submenu.add(item)
 
@@ -422,14 +462,21 @@ class TimeRecorder(rumps.App):
             self.presets_submenu.add(rumps.MenuItem(None))
 
         # 管理按钮
-        add_item = rumps.MenuItem("✚ 添加预设", callback=self._on_add_preset)
+        add_item = rumps.MenuItem(
+            f"✚ 添加预设（{len(self.presets)}/{MAX_PRESETS}）",
+            callback=self._menu_callback("添加预设", self._on_add_preset),
+        )
         self.presets_submenu.add(add_item)
-        reset_item = rumps.MenuItem("↺ 恢复默认", callback=self._on_reset_presets)
+        reset_item = rumps.MenuItem("↺ 恢复默认", callback=self._menu_callback("恢复默认预设", self._on_reset_presets))
         self.presets_submenu.add(reset_item)
 
     def _on_delete_preset(self, sender):
         """删除预设（点击预设项即删除）"""
         idx = sender._preset_index
+        if not 0 <= idx < len(self.presets):
+            write_error_log("删除预设失败", message=f"预设索引失效: {idx}, 当前数量: {len(self.presets)}")
+            self._rebuild_presets_menu()
+            return
         name = self.presets[idx]
         result = safe_alert(
             title="确认删除",
@@ -463,7 +510,7 @@ class TimeRecorder(rumps.App):
             if name in self.presets:
                 safe_alert(title="提示", message=f"「{name}」已存在")
                 return
-            self.presets.append(name)
+            self.presets = normalize_presets([*self.presets, name])
             self._rebuild_presets_menu()
             self._save_config()
 
@@ -483,6 +530,13 @@ class TimeRecorder(rumps.App):
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     #  核心逻辑：定时检查 & 弹窗记录
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    def _safe_on_tick(self, sender):
+        """定时器入口：记录异常，避免定时器故障后悄悄失效。"""
+        try:
+            self.on_tick(sender)
+        except Exception as e:
+            log_exception("定时检查失败", e)
 
     def on_tick(self, _):
         """每秒触发 — 检查是否该弹窗记录了"""
@@ -732,6 +786,7 @@ class TimeRecorder(rumps.App):
             content.addSubview_(skip_btn)
 
             retained_controls.extend([record_btn, skip_btn])
+            panel.setDelegate_(handler)
             panel.makeFirstResponder_(input_field)
 
             result = AppKit.NSApplication.sharedApplication().runModalForWindow_(panel)
@@ -752,6 +807,7 @@ class TimeRecorder(rumps.App):
                     log_exception("读取记录面板输入内容失败", e)
                     pass
 
+            panel.setDelegate_(None)
             panel.orderOut_(None)
             panel = None
 
@@ -763,6 +819,8 @@ class TimeRecorder(rumps.App):
         except Exception as e:
             if panel is not None:
                 try:
+                    AppKit.NSApplication.sharedApplication().stopModalWithCode_(0)
+                    panel.setDelegate_(None)
                     panel.orderOut_(None)
                 except Exception as close_error:
                     log_exception("关闭记录面板失败", close_error)
@@ -1047,13 +1105,17 @@ class TimeRecorder(rumps.App):
             )
             content.addSubview_(close_btn)
             retained_controls = [handler, close_btn, text_view, scroll]
+            panel.setDelegate_(handler)
 
             AppKit.NSApplication.sharedApplication().runModalForWindow_(panel)
+            panel.setDelegate_(None)
             panel.orderOut_(None)
             return True
         except Exception as e:
             if panel is not None:
                 try:
+                    AppKit.NSApplication.sharedApplication().stopModalWithCode_(0)
+                    panel.setDelegate_(None)
                     panel.orderOut_(None)
                 except Exception as close_error:
                     log_exception("关闭统计窗口失败", close_error)

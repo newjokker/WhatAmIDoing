@@ -45,6 +45,28 @@ class ActivityParsingTests(unittest.TestCase):
         )
 
 
+class PresetTests(unittest.TestCase):
+    def test_normalize_presets_deduplicates_and_limits_to_12(self):
+        presets = [" 写代码 ", "写代码", "", "开会"] + [f"活动{i}" for i in range(20)]
+
+        normalized = time_recorder.normalize_presets(presets)
+
+        self.assertEqual(len(normalized), time_recorder.MAX_PRESETS)
+        self.assertEqual(time_recorder.MAX_PRESETS, 12)
+        self.assertEqual(normalized[:2], ["写代码", "开会"])
+
+    def test_add_preset_stops_at_maximum(self):
+        app = object.__new__(time_recorder.TimeRecorder)
+        app.presets = [f"活动{i}" for i in range(time_recorder.MAX_PRESETS)]
+
+        with mock.patch.object(time_recorder, "safe_alert") as alert, \
+                mock.patch.object(time_recorder.rumps, "Window", create=True) as window:
+            app._on_add_preset(None)
+
+        alert.assert_called_once()
+        window.assert_not_called()
+
+
 class ActivitySummaryTests(unittest.TestCase):
     def test_build_activity_summary(self):
         activities = [
@@ -116,6 +138,26 @@ class ErrorLogTests(unittest.TestCase):
                     app.open_error_logs(None)
 
                 run.assert_called_once_with(["open", tmp], check=False)
+        finally:
+            time_recorder.ERROR_LOG_DIR = old_dir
+            time_recorder.ERROR_LOG_FILE = old_file
+
+    def test_safe_on_tick_writes_log_when_timer_fails(self):
+        old_dir = time_recorder.ERROR_LOG_DIR
+        old_file = time_recorder.ERROR_LOG_FILE
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                time_recorder.ERROR_LOG_DIR = tmp
+                time_recorder.ERROR_LOG_FILE = str(Path(tmp) / "error.log")
+                app = object.__new__(time_recorder.TimeRecorder)
+                app.on_tick = mock.Mock(side_effect=RuntimeError("tick boom"))
+
+                app._safe_on_tick(None)
+
+                content = Path(time_recorder.ERROR_LOG_FILE).read_text(encoding="utf-8")
+
+            self.assertIn("定时检查失败", content)
+            self.assertIn("RuntimeError: tick boom", content)
         finally:
             time_recorder.ERROR_LOG_DIR = old_dir
             time_recorder.ERROR_LOG_FILE = old_file
