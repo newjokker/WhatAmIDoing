@@ -1,14 +1,14 @@
 #!/bin/bash
-# kill_app.sh — 强制关闭所有「时间记录器」实例（用于测试）
+# kill_app.sh — 强制关闭所有「干啥来着」实例（用于测试）
 
-echo "🔍 查找时间记录器相关进程..."
+echo "🔍 查找干啥来着相关进程..."
 
 PIDS=$(pgrep -f "time_recorder" 2>/dev/null)
-PIDS2=$(pgrep -f "时间记录器" 2>/dev/null)
+PIDS2=$(pgrep -f "干啥来着" 2>/dev/null)
 ALL_PIDS=$(echo -e "$PIDS\n$PIDS2" | sort -u | grep -v '^$')
 
 if [ -z "$ALL_PIDS" ]; then
-    echo "✅ 没有找到运行中的时间记录器实例"
+    echo "✅ 没有找到运行中的干啥来着实例"
     exit 0
 fi
 

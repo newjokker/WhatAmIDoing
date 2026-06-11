@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-⏰ 时间记录器 - macOS 菜单栏活动记录器
+⏰ 干啥来着 - macOS 菜单栏活动记录器
 基于 rumps 实现
 
 功能:
@@ -13,7 +13,7 @@
 """
 
 __version__ = "1.4.9"
-__app_name__ = "⏰ 时间记录器"
+__app_name__ = "⏰ 干啥来着"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
 
@@ -380,7 +380,7 @@ def get_idle_time():
 
 
 class TimeRecorder(rumps.App):
-    """菜单栏时间记录器"""
+    """菜单栏干啥来着"""
 
     def __init__(self):
         super().__init__("⏰ 待命", quit_button=None)
@@ -1439,7 +1439,7 @@ class TimeRecorder(rumps.App):
     def show_about(self, _):
         """关于信息"""
         safe_alert(
-            title=f"⏰ 时间记录器 v{__version__}",
+            title=f"⏰ 干啥来着 v{__version__}",
             message=(
                 "macOS 菜单栏活动记录器\n\n"
                 f"默认每 {DEFAULT_INTERVAL} 分钟询问一次当前活动\n"

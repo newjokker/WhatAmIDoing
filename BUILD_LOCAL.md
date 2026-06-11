@@ -11,7 +11,7 @@
 | 虚拟环境（site-packages） | `/Users/jokkerling/.workbuddy/binaries/python/envs/default/` |
 | pip 路径 | `/Users/jokkerling/.workbuddy/binaries/python/envs/default/bin/pip` |
 | 依赖 | rumps, py2app |
-| 构建产物 | `dist/时间记录器.app`（arm64 原生） |
+| 构建产物 | `dist/干啥来着.app`（arm64 原生） |
 | DMG 产物 | `releases/WhatAmIDoing-v{VERSION}.dmg` |
 
 ## 一次性环境准备
@@ -87,7 +87,7 @@ grep -c "hasattr(zlib" /Users/jokkerling/.workbuddy/binaries/python/envs/default
 ### 构建 .app
 
 ```bash
-cd /Volumes/Jokker/Code/时间记录器
+cd /Volumes/Jokker/Code/干啥来着
 rm -rf build dist
 /Users/jokkerling/.workbuddy/binaries/python/envs/default/bin/python make_icon.py
 /Users/jokkerling/.workbuddy/binaries/python/envs/default/bin/python setup.py py2app
@@ -96,7 +96,7 @@ rm -rf build dist
 ### 验证构建产物
 
 ```bash
-file dist/时间记录器.app/Contents/MacOS/time_recorder
+file dist/干啥来着.app/Contents/MacOS/time_recorder
 # 必须输出: Mach-O 64-bit executable arm64
 ```
 
@@ -109,14 +109,14 @@ make dmg
 ## 完整一键构建
 
 ```bash
-cd /Volumes/Jokker/Code/时间记录器
+cd /Volumes/Jokker/Code/干啥来着
 rm -rf build dist
 
 /Users/jokkerling/.workbuddy/binaries/python/envs/default/bin/python make_icon.py
 /Users/jokkerling/.workbuddy/binaries/python/envs/default/bin/python setup.py py2app
 
 # 验证
-file dist/时间记录器.app/Contents/MacOS/time_recorder
+file dist/干啥来着.app/Contents/MacOS/time_recorder
 
 # 打包 DMG
 make dmg
@@ -130,4 +130,4 @@ make dmg
 | `code signature ... different Team IDs` | 签名不匹配 | `codesign -f -s -` 重签 |
 | `AttributeError: module 'zlib' has no attribute '__file__'` | py2app 补丁丢失 | 重新打补丁 |
 | `Python 架构为 x86_64` | 用错了 Python | 确认使用 managed Python 3.13 |
-| 构建 App 被 Gatekeeper 阻止 | 未签名 App | `xattr -cr dist/时间记录器.app` |
+| 构建 App 被 Gatekeeper 阻止 | 未签名 App | `xattr -cr dist/干啥来着.app` |

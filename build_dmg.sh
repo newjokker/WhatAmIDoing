@@ -1,5 +1,5 @@
 #!/bin/bash
-# build_dmg.sh — 构建时间记录器 DMG 并移动到 releases 目录
+# build_dmg.sh — 构建干啥来着 DMG 并移动到 releases 目录
 # 用法: ./build_dmg.sh
 #
 # 流程：
@@ -13,7 +13,7 @@ set -euo pipefail
 # ── 配置 ──
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PYTHON="/Users/jokkerling/.workbuddy/binaries/python/envs/default/bin/python"
-APP_NAME="时间记录器"
+APP_NAME="干啥来着"
 
 # ── 读取版本号 ──
 VERSION=$(grep '__version__' "$SCRIPT_DIR/time_recorder.py" | head -1 | sed 's/.*= "//;s/".*//')

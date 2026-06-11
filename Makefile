@@ -2,7 +2,7 @@ SHELL   := /bin/bash
 # 必须使用 ARM64 原生 Python
 PYTHON  := /Users/jokkerling/.workbuddy/binaries/python/versions/3.13.12/bin/python3
 PYTHON_ENV := /Users/jokkerling/.workbuddy/binaries/python/envs/default
-NAME    := 时间记录器
+NAME    := 干啥来着
 VERSION := $(shell grep '__version__' time_recorder.py | head -1 | sed "s/.*= \"//;s/\".*//")
 .DEFAULT_GOAL := help
 

@@ -12,8 +12,8 @@ OPTIONS = {
     "argv_emulation": False,
     "iconfile": "icon.icns",
     "plist": {
-        "CFBundleName": "时间记录器",
-        "CFBundleDisplayName": "⏰ 时间记录器",
+        "CFBundleName": "干啥来着",
+        "CFBundleDisplayName": "⏰ 干啥来着",
         "CFBundleIdentifier": "com.timerecorder.app",
         "CFBundleVersion": VERSION,
         "CFBundleShortVersionString": VERSION,
