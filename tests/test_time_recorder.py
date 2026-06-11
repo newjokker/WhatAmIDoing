@@ -143,12 +143,12 @@ class UpdateDownloadTests(unittest.TestCase):
     def test_select_release_asset_prefers_dmg(self):
         assets = [
             {"name": "source.zip", "browser_download_url": "https://example.com/source.zip"},
-            {"name": "WhatAmIDoing-v1.4.8.dmg", "browser_download_url": "https://example.com/app.dmg"},
+            {"name": "WhatAmIDoing-v1.4.9.dmg", "browser_download_url": "https://example.com/app.dmg"},
         ]
 
         selected = time_recorder.select_release_asset(assets)
 
-        self.assertEqual(selected["name"], "WhatAmIDoing-v1.4.8.dmg")
+        self.assertEqual(selected["name"], "WhatAmIDoing-v1.4.9.dmg")
 
     def test_select_release_asset_ignores_assets_without_download_url(self):
         assets = [
