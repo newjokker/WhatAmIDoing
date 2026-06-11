@@ -85,6 +85,42 @@ class ActivitySummaryTests(unittest.TestCase):
         self.assertEqual(summary["recent"][0]["time"], "11:00")
 
 
+class ReminderTimeTests(unittest.TestCase):
+    def test_calculate_next_reminder_time(self):
+        next_time = time_recorder.calculate_next_reminder_time("2026-06-11T09:00:00", 15)
+
+        self.assertEqual(next_time.isoformat(), "2026-06-11T09:15:00")
+
+    def test_calculate_next_reminder_time_handles_invalid_value(self):
+        self.assertIsNone(time_recorder.calculate_next_reminder_time("bad-time", 15))
+
+    def test_format_menu_datetime_for_empty_value(self):
+        self.assertEqual(time_recorder.format_menu_datetime(None), "暂无")
+
+    def test_save_config_persists_last_reminder_time(self):
+        old_dir = time_recorder.CONFIG_DIR
+        old_file = time_recorder.CONFIG_FILE
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                time_recorder.CONFIG_DIR = tmp
+                time_recorder.CONFIG_FILE = str(Path(tmp) / ".time_recorder.json")
+                app = object.__new__(time_recorder.TimeRecorder)
+                app.interval_minutes = 5
+                app.idle_threshold_minutes = 0
+                app.presets = ["写代码"]
+                app.last_check_time = "2026-06-11T09:00:00"
+                app.last_reminder_time = "2026-06-11T08:55:00"
+                app.activities = []
+
+                app._save_config()
+                data = json.loads(Path(time_recorder.CONFIG_FILE).read_text(encoding="utf-8"))
+
+            self.assertEqual(data["last_reminder_time"], "2026-06-11T08:55:00")
+        finally:
+            time_recorder.CONFIG_DIR = old_dir
+            time_recorder.CONFIG_FILE = old_file
+
+
 class VersionTests(unittest.TestCase):
     def test_compare_versions(self):
         compare = time_recorder.TimeRecorder._compare_versions
@@ -107,12 +143,12 @@ class UpdateDownloadTests(unittest.TestCase):
     def test_select_release_asset_prefers_dmg(self):
         assets = [
             {"name": "source.zip", "browser_download_url": "https://example.com/source.zip"},
-            {"name": "WhatAmIDoing-v1.4.7.dmg", "browser_download_url": "https://example.com/app.dmg"},
+            {"name": "WhatAmIDoing-v1.4.8.dmg", "browser_download_url": "https://example.com/app.dmg"},
         ]
 
         selected = time_recorder.select_release_asset(assets)
 
-        self.assertEqual(selected["name"], "WhatAmIDoing-v1.4.7.dmg")
+        self.assertEqual(selected["name"], "WhatAmIDoing-v1.4.8.dmg")
 
     def test_select_release_asset_ignores_assets_without_download_url(self):
         assets = [

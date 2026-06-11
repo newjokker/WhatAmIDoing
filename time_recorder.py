@@ -12,7 +12,7 @@
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.4.7"
+__version__ = "1.4.8"
 __app_name__ = "⏰ 时间记录器"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
@@ -192,6 +192,35 @@ def parse_activity_input(text, presets):
     return activities
 
 
+def parse_iso_datetime(value):
+    """安全解析 ISO 时间字符串。"""
+    try:
+        return datetime.datetime.fromisoformat(value) if value else None
+    except (TypeError, ValueError):
+        return None
+
+
+def format_menu_datetime(value):
+    """格式化菜单里展示的提醒时间。"""
+    dt = parse_iso_datetime(value)
+    if dt is None:
+        return "暂无"
+    today = datetime.date.today()
+    if dt.date() == today:
+        return dt.strftime("今天 %H:%M")
+    if dt.date() == today + datetime.timedelta(days=1):
+        return dt.strftime("明天 %H:%M")
+    return dt.strftime("%m-%d %H:%M")
+
+
+def calculate_next_reminder_time(last_check_time, interval_minutes):
+    """根据上次计时基准计算下次提醒时间。"""
+    last_check = parse_iso_datetime(last_check_time)
+    if last_check is None:
+        return None
+    return last_check + datetime.timedelta(minutes=interval_minutes)
+
+
 def build_activity_summary(activities):
     """生成统计页使用的聚合数据。"""
     counts = {}
@@ -367,6 +396,7 @@ class TimeRecorder(rumps.App):
         if not self.presets:
             self.presets = list(DEFAULT_PRESETS)
         self.last_check_time = config.get("last_check_time", None)
+        self.last_reminder_time = config.get("last_reminder_time", None)
         self.activities = config.get("activities", [])
         self.recording_lock = False  # 防止重复弹窗
 
@@ -404,6 +434,7 @@ class TimeRecorder(rumps.App):
             "idle_threshold_minutes": self.idle_threshold_minutes,
             "presets": self.presets,
             "last_check_time": self.last_check_time,
+            "last_reminder_time": self.last_reminder_time,
             "activities": self.activities,
         }
         try:
@@ -447,6 +478,8 @@ class TimeRecorder(rumps.App):
 
         # ── 上次活动 ──
         self.last_activity_item = rumps.MenuItem("⏳ 暂无记录", callback=None)
+        self.last_reminder_item = rumps.MenuItem("🔔 上次提醒: 暂无", callback=None)
+        self.next_reminder_item = rumps.MenuItem("⏭ 下次提醒: 暂无", callback=None)
 
         # ── 汇总菜单 ──
         self.today_item = rumps.MenuItem("📅 今日汇总", callback=self._menu_callback("今日汇总", self.show_today_summary))
@@ -492,6 +525,8 @@ class TimeRecorder(rumps.App):
             self.check_now_item,
             None,
             self.last_activity_item,
+            self.last_reminder_item,
+            self.next_reminder_item,
             None,
             self.today_item,
             self.week_item,
@@ -509,6 +544,7 @@ class TimeRecorder(rumps.App):
         ]
 
         self._update_last_activity()
+        self._update_reminder_items()
 
     def _setup_duration_menu(self, parent, current_value, values, callback):
         """为子菜单添加时长选项列表"""
@@ -528,6 +564,7 @@ class TimeRecorder(rumps.App):
         self.interval_minutes = sender._setting_value
         self.title = f"⏰ {self.interval_minutes}min"
         self._save_config()
+        self._update_reminder_items()
 
     def _on_set_idle_threshold(self, sender):
         """设置空闲阈值"""
@@ -646,6 +683,7 @@ class TimeRecorder(rumps.App):
         if self.last_check_time is None:
             self.last_check_time = now.isoformat()
             self._save_config()
+            self._update_reminder_items()
             return
 
         try:
@@ -653,6 +691,7 @@ class TimeRecorder(rumps.App):
         except (ValueError, TypeError):
             self.last_check_time = now.isoformat()
             self._save_config()
+            self._update_reminder_items()
             return
 
         elapsed = (now - last_check).total_seconds() / 60
@@ -673,8 +712,11 @@ class TimeRecorder(rumps.App):
     def _show_recording_dialog(self):
         """弹出记录窗口——复选框勾选 + 自定义输入，点记录统一提交"""
         self.recording_lock = True
-        self.last_check_time = datetime.datetime.now().isoformat()
+        reminder_time = datetime.datetime.now().isoformat()
+        self.last_check_time = reminder_time
+        self.last_reminder_time = reminder_time
         self._save_config()
+        self._update_reminder_items()
 
         try:
             # 尝试原生面板，失败时回退到文本对话框
@@ -963,6 +1005,7 @@ class TimeRecorder(rumps.App):
         now = datetime.datetime.now()
         self.last_check_time = (now - datetime.timedelta(minutes=self.interval_minutes + 1)).isoformat()
         self._save_config()
+        self._update_reminder_items()
         safe_notification(
             title="⏱ 计时器已重置",
             subtitle=f"将在 {self.interval_minutes} 分钟内弹窗",
@@ -1044,6 +1087,15 @@ class TimeRecorder(rumps.App):
             return
         last = self.activities[-1]
         self.last_activity_item.title = f"🕐 最近: {last['activity']} ({last['time']})"
+
+    def _update_reminder_items(self):
+        """更新菜单栏中的上次/下次提醒时间。"""
+        if hasattr(self, "last_reminder_item"):
+            self.last_reminder_item.title = f"🔔 上次提醒: {format_menu_datetime(self.last_reminder_time)}"
+        if hasattr(self, "next_reminder_item"):
+            next_time = calculate_next_reminder_time(self.last_check_time, self.interval_minutes)
+            text = "暂无" if next_time is None else format_menu_datetime(next_time.isoformat())
+            self.next_reminder_item.title = f"⏭ 下次提醒: {text}"
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     #  汇总功能
