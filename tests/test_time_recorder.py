@@ -179,6 +179,43 @@ class DailySummaryTests(unittest.TestCase):
 
         self.assertIsNone(app.daily_summary_time)
 
+    def test_maybe_show_daily_summary_marks_date_after_show(self):
+        app = object.__new__(time_recorder.TimeRecorder)
+        app.daily_summary_time = "17:30"
+        app.last_daily_summary_date = "2026-06-10"
+        calls = []
+
+        def fake_show(_):
+            calls.append(("show", app.last_daily_summary_date))
+
+        def fake_save():
+            calls.append(("save", app.last_daily_summary_date))
+
+        app._activate_app_for_prompt = lambda: calls.append(("activate", app.last_daily_summary_date))
+        app.show_today_summary = fake_show
+        app._save_config = fake_save
+
+        app._maybe_show_daily_summary(datetime.datetime(2026, 6, 11, 17, 30))
+
+        self.assertEqual(calls[0], ("activate", "2026-06-10"))
+        self.assertEqual(calls[1], ("show", "2026-06-10"))
+        self.assertEqual(calls[2], ("save", "2026-06-11"))
+        self.assertEqual(app.last_daily_summary_date, "2026-06-11")
+
+    def test_setting_daily_summary_time_resets_today_marker(self):
+        app = object.__new__(time_recorder.TimeRecorder)
+        app.daily_summary_time = "17:30"
+        app.last_daily_summary_date = "2026-06-11"
+        sender = types.SimpleNamespace(_setting_value="20:40")
+
+        app._save_config = mock.Mock()
+        app._rebuild_daily_summary_menu = mock.Mock()
+        app._on_set_daily_summary_time(sender)
+
+        self.assertEqual(app.daily_summary_time, "20:40")
+        self.assertIsNone(app.last_daily_summary_date)
+        app._save_config.assert_called_once()
+
 
 class LaunchAgentTests(unittest.TestCase):
     def test_build_launch_agent_plist(self):

@@ -12,7 +12,7 @@
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.4.12"
+__version__ = "1.4.14"
 __app_name__ = "⏰ 干啥来着"
 __bundle_id__ = "com.timerecorder.app"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
@@ -697,6 +697,7 @@ class TimeRecorder(rumps.App):
     def _on_set_daily_summary_time(self, sender):
         """设置每日汇总提醒时间。"""
         self.daily_summary_time = normalize_daily_summary_time(sender._setting_value)
+        self.last_daily_summary_date = None
         self._save_config()
         self._rebuild_daily_summary_menu()
 
@@ -715,12 +716,14 @@ class TimeRecorder(rumps.App):
                 safe_alert(title="每日汇总提醒", message="时间格式不正确，请输入例如 17:30")
                 return
             self.daily_summary_time = summary_time
+            self.last_daily_summary_date = None
             self._save_config()
             self._rebuild_daily_summary_menu()
 
     def _on_disable_daily_summary(self, _):
         """关闭每日汇总提醒。"""
         self.daily_summary_time = None
+        self.last_daily_summary_date = None
         self._save_config()
         self._rebuild_daily_summary_menu()
 
@@ -891,9 +894,19 @@ class TimeRecorder(rumps.App):
         """到达每日指定时间后自动展示今日汇总，每天只展示一次。"""
         if not is_daily_summary_due(now, self.daily_summary_time, self.last_daily_summary_date):
             return
+        self._activate_app_for_prompt()
+        self.show_today_summary(None)
         self.last_daily_summary_date = now.date().isoformat()
         self._save_config()
-        self.show_today_summary(None)
+
+    def _activate_app_for_prompt(self):
+        """自动弹窗前把菜单栏应用激活到前台。"""
+        try:
+            import AppKit
+
+            AppKit.NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+        except Exception as e:
+            log_exception("激活应用窗口失败", e)
 
     def _show_recording_dialog(self):
         """弹出记录窗口——复选框勾选 + 自定义输入，点记录统一提交"""
