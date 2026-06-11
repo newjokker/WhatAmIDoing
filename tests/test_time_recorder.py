@@ -102,6 +102,37 @@ class VersionTests(unittest.TestCase):
         self.assertEqual(version_line, f'version = "{time_recorder.__version__}"')
 
 
+class UpdateDownloadTests(unittest.TestCase):
+    def test_select_release_asset_prefers_dmg(self):
+        assets = [
+            {"name": "source.zip", "browser_download_url": "https://example.com/source.zip"},
+            {"name": "WhatAmIDoing-v1.4.6.dmg", "browser_download_url": "https://example.com/app.dmg"},
+        ]
+
+        selected = time_recorder.select_release_asset(assets)
+
+        self.assertEqual(selected["name"], "WhatAmIDoing-v1.4.6.dmg")
+
+    def test_select_release_asset_ignores_assets_without_download_url(self):
+        assets = [
+            {"name": "broken.dmg"},
+            {"name": "fallback.zip", "browser_download_url": "https://example.com/fallback.zip"},
+        ]
+
+        selected = time_recorder.select_release_asset(assets)
+
+        self.assertEqual(selected["name"], "fallback.zip")
+
+    def test_unique_download_path_sanitizes_and_avoids_overwrite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            existing = Path(tmp) / "update.dmg"
+            existing.write_text("old", encoding="utf-8")
+
+            path = time_recorder.unique_download_path(tmp, "../update.dmg")
+
+        self.assertTrue(path.endswith("update (1).dmg"))
+
+
 class ErrorLogTests(unittest.TestCase):
     def test_write_error_log_creates_file_with_traceback(self):
         old_dir = time_recorder.ERROR_LOG_DIR

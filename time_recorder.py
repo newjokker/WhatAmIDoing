@@ -12,7 +12,7 @@
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.4.5"
+__version__ = "1.4.6"
 __app_name__ = "⏰ 时间记录器"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
@@ -77,6 +77,7 @@ CONFIG_DIR = os.path.expanduser("~")
 CONFIG_FILE = os.path.join(CONFIG_DIR, ".time_recorder.json")
 ERROR_LOG_DIR = os.path.expanduser("~/Library/Logs/TimeRecorder")
 ERROR_LOG_FILE = os.path.join(ERROR_LOG_DIR, "error.log")
+DOWNLOAD_DIR = os.path.expanduser("~/Downloads")
 
 
 def ensure_error_log_dir(log_dir=None):
@@ -211,6 +212,64 @@ def build_activity_summary(activities):
         "counts": sorted_counts,
         "recent": recent,
     }
+
+
+def select_release_asset(assets):
+    """从 GitHub Release assets 中优先选择 DMG 安装包。"""
+    candidates = [
+        asset for asset in assets or []
+        if asset.get("browser_download_url") and asset.get("name")
+    ]
+    dmg_assets = [
+        asset for asset in candidates
+        if asset.get("name", "").lower().endswith(".dmg")
+    ]
+    return (dmg_assets or candidates or [None])[0]
+
+
+def safe_download_filename(filename):
+    """清理下载文件名，避免路径穿越和 macOS 文件名问题。"""
+    name = os.path.basename(str(filename or "").strip())
+    name = re.sub(r'[/:\\\0]+', "-", name)
+    return name or "TimeRecorder-update.dmg"
+
+
+def unique_download_path(directory, filename):
+    """生成不会覆盖已有文件的下载路径。"""
+    safe_name = safe_download_filename(filename)
+    base, ext = os.path.splitext(safe_name)
+    path = os.path.join(directory, safe_name)
+    i = 1
+    while os.path.exists(path):
+        path = os.path.join(directory, f"{base} ({i}){ext}")
+        i += 1
+    return path
+
+
+def download_release_asset(url, dest_path):
+    """把 Release asset 下载到本地，成功后返回保存路径。"""
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    tmp_path = f"{dest_path}.download"
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": f"TimeRecorder/{__version__}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp, open(tmp_path, "wb") as f:
+            while True:
+                chunk = resp.read(1024 * 256)
+                if not chunk:
+                    break
+                f.write(chunk)
+        os.replace(tmp_path, dest_path)
+        return dest_path
+    except Exception:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def safe_alert(**kwargs):
@@ -1213,6 +1272,7 @@ class TimeRecorder(rumps.App):
                 data = json.loads(resp.read().decode("utf-8"))
                 latest_tag = data.get("tag_name", "").lstrip("v")
                 release_url = data.get("html_url", f"{__repo_url__}/releases")
+                asset = select_release_asset(data.get("assets", []))
 
             if not latest_tag:
                 safe_alert(title="🔄 检查更新", message="未能获取版本信息，请稍后重试")
@@ -1220,15 +1280,44 @@ class TimeRecorder(rumps.App):
 
             cmp = self._compare_versions(latest_tag, __version__)
             if cmp > 0:
-                safe_alert(
+                if not asset:
+                    safe_alert(
+                        title="🔄 发现新版本！",
+                        message=(
+                            f"当前版本: v{__version__}\n"
+                            f"最新版本: v{latest_tag}\n\n"
+                            "这个 Release 没有可下载的安装包，请前往 GitHub Releases 查看：\n"
+                            f"{release_url}"
+                        ),
+                    )
+                    return
+
+                asset_name = safe_download_filename(asset.get("name"))
+                confirm = safe_alert(
                     title="🔄 发现新版本！",
                     message=(
                         f"当前版本: v{__version__}\n"
                         f"最新版本: v{latest_tag}\n\n"
-                        "请前往 GitHub Releases 下载：\n"
-                        f"{release_url}"
+                        f"将下载：{asset_name}\n"
+                        "下载完成后需要手动打开安装。"
                     ),
+                    ok="下载",
+                    cancel="取消",
                 )
+                if not confirm:
+                    return
+
+                self.update_item.title = "⬇️ 下载中…"
+                dest_path = unique_download_path(DOWNLOAD_DIR, asset_name)
+                download_release_asset(asset.get("browser_download_url"), dest_path)
+                open_folder = safe_alert(
+                    title="✅ 下载完成",
+                    message=f"已保存到：\n{dest_path}\n\n是否打开下载文件夹？",
+                    ok="打开",
+                    cancel="稍后",
+                )
+                if open_folder:
+                    subprocess.run(["open", os.path.dirname(dest_path)], check=False)
             else:
                 safe_alert(title="🔄 检查更新", message=f"当前版本: v{__version__}\n已是最新版本 🎉")
         except urllib.error.URLError:
