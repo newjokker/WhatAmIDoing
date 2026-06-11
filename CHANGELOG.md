@@ -1,17 +1,35 @@
 # 变更日志
 
-## v1.4.0 (2026-06-10)
+## v1.4.2 (2026-06-11)
+
+### 修复（关键崩溃修复）
+- **彻底修复勾选复选框 + 输入自定义内容时 app 崩溃消失的问题**
+  - 根因：`_SimplePanelHandler`（ObjC 回调类）持有 `self._checkboxes` 列表中的 NSButton 对象引用，
+    `recordClicked_` 回调中遍历并访问这些 ObjC 对象时，若面板正在关闭/对象状态异常，会触发 SegFault，导致整个 app 崩溃
+  - 修复：`_SimplePanelHandler` 不再持有任何 ObjC 对象引用，`recordClicked_` / `skipClicked_` 只调用 `stopModalWithCode_`
+  - 面板内容读取改为：模态结束后、面板释放前，在 Python 侧统一读取 checkbox 状态和输入框内容
+  - 这是唯一安全的做法——ObjC 回调里不碰任何 ObjC 控件对象
+
+### 技术细节
+- `checkboxes` 和 `input_field` 改为 `_try_panel_dialog` 的局部变量
+- `runModalForWindow_` 返回后、 `panel.release()` 之前读取结果
+- handler 类变得极简，只负责结束模态，不再处理业务逻辑
+
+## v1.4.1 (2026-06-10)
+
+### 修复
+- **预设按钮改为复选框**：v1.4.0 错误地将复选框改成了普通按钮，点击即记录导致闪退；恢复为 `NSButtonTypeSwitch` 复选框，勾选后需点「记录」统一提交
+- 修复点击第一个预设按钮闪退问题（原因为 push button 的 `presetClicked:` action 在 handler 中未正确处理）
 
 ### 变更
-- **弹窗界面大简化**：去掉复杂的复选框 + 添加/清除按钮交互，改为极简设计
-- 预设选项改为**普通按钮**，点击即记录并关闭窗口，一步完成
-- 自定义输入精简为单行文本框 + 记录按钮，不再支持多活动同时记录
-- "取消" 改为 "跳过"，语义更清晰
-- 面板宽度缩窄至 380px，更紧凑
+- 复选框 + 自定义输入可同时使用，点「记录」统一提交
+- handler 从 `_SimplePanelHandler` 重构，支持 `setup(checkboxes, input_field, result_list)` 接收复选框列表
 
-### 技术改进
-- 重写 `_PanelButtonHandler` 为 `_SimplePanelHandler`，ObjC 回调更简洁
-- 减少面板内部控件数量，降低潜在崩溃风险
+## v1.4.0 (2026-06-10) [已撤回]
+
+### 变更（有缺陷，v1.4.1 修复）
+- 错误地将预设复选框改为普通按钮，导致交互不符合预期且存在闪退问题
+- 此版本不应使用，请直接使用 v1.4.1
 
 ## v1.3.1 (2026-06-10)
 

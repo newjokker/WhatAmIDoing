@@ -6,13 +6,13 @@
 功能:
     - 每 N 分钟（默认 5 分钟）弹窗询问"当前在做什么"
     - 检测电脑是否在使用中（空闲超过阈值则跳过，可关闭）
-    - 简化弹窗：点击预设即记录，或输入自定义活动
+    - 简化弹窗：勾选复选框 + 输入自定义，点记录统一提交
     - 今日 / 本周 / 全部活动汇总
     - 自定义预设活动列表
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.4.0"
+__version__ = "1.4.2"
 __app_name__ = "⏰ 时间记录器"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
@@ -35,29 +35,14 @@ try:
     import objc
 
     class _SimplePanelHandler(AppKit.NSObject):
-        """简化面板按钮回调：点击预设即记录，自定义输入后点记录"""
-
-        @objc.python_method
-        def setup(self, input_field, result_list):
-            self._input_field = input_field
-            self._result_list = result_list
-
-        def presetClicked_(self, sender):
-            """点击预设按钮 → 立即记录该活动并关闭"""
-            name = sender.title().strip()[:20]
-            if name:
-                self._result_list.append(name)
-            AppKit.NSApplication.sharedApplication().stopModalWithCode_(1)
+        """简化面板回调：只负责结束模态，不读取控件内容"""
 
         def recordClicked_(self, sender):
-            """点击记录按钮 → 记录自定义输入，空输入则跳过"""
-            text = self._input_field.stringValue().strip()[:20]
-            if text:
-                self._result_list.append(text)
+            """点记录 → 直接结束模态，返回 code=1"""
             AppKit.NSApplication.sharedApplication().stopModalWithCode_(1)
 
         def skipClicked_(self, sender):
-            """点击跳过按钮"""
+            """点击跳过 → 直接结束模态，返回 code=0"""
             AppKit.NSApplication.sharedApplication().stopModalWithCode_(0)
 
     _PANEL_HANDLER_CLS = _SimplePanelHandler
@@ -375,7 +360,7 @@ class TimeRecorder(rumps.App):
                 self._show_recording_dialog()
 
     def _show_recording_dialog(self):
-        """弹出记录窗口——简化版：点击预设即记录"""
+        """弹出记录窗口——复选框勾选 + 自定义输入，点记录统一提交"""
         self.recording_lock = True
         self.last_check_time = datetime.datetime.now().isoformat()
         self._save_config()
@@ -387,23 +372,27 @@ class TimeRecorder(rumps.App):
         self.recording_lock = False
 
     def _try_panel_dialog(self):
-        """简化版原生面板——点击预设即记录，或输入自定义活动。
+        """简化版原生面板——复选框勾选 + 自定义输入，点记录统一提交。
+        回调只负责结束模态；面板内容在模态结束后、释放前由 Python 读取。
         返回 True 表示成功完成，False 表示失败需回退。"""
         import AppKit
         import Foundation
 
         panel = None
+        checkboxes = []   # 本地引用，不断给 handler
+        input_field = None
+        result_list = []
+
         try:
             # ── 布局计算 ──
             max_cols = 3
-            btn_w, btn_h = 110, 30
-            gap_x, gap_y = 8, 8
+            cb_w, cb_h = 110, 24
+            gap_x, gap_y = 8, 6
             rows = (len(self.presets) + max_cols - 1) // max_cols
-            preset_h = rows * btn_h + max(0, rows - 1) * gap_y
+            preset_h = rows * cb_h + max(0, rows - 1) * gap_y
 
-            panel_w = 380
-            # 标题 50 + 预设区 + 间距 12 + 分隔线 2 + 间距 6 + 输入 30 + 间距 12 + 按钮 36
-            panel_h = int(50 + preset_h + 12 + 2 + 6 + 30 + 12 + 36)
+            panel_w = 400
+            panel_h = int(46 + preset_h + 10 + 1 + 8 + 28 + 12 + 34)
 
             # ── 创建面板 ──
             panel = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -421,39 +410,36 @@ class TimeRecorder(rumps.App):
 
             # ── 标题 ──
             title_lbl = AppKit.NSTextField.alloc().initWithFrame_(
-                Foundation.NSMakeRect(20, panel_h - 42, panel_w - 40, 24)
+                Foundation.NSMakeRect(20, panel_h - 38, panel_w - 40, 22)
             )
             title_lbl.setStringValue_("现在在做什么？")
             title_lbl.setBezeled_(False)
             title_lbl.setDrawsBackground_(False)
             title_lbl.setEditable_(False)
-            title_lbl.setFont_(AppKit.NSFont.boldSystemFontOfSize_(15))
+            title_lbl.setFont_(AppKit.NSFont.boldSystemFontOfSize_(14))
             content.addSubview_(title_lbl)
 
-            # ── 预设按钮（点击即记录） ──
-            preset_start_y = panel_h - 74
-            result_list = []
-
-            handler = _SimplePanelHandler.alloc().init()
+            # ── 复选框（勾选预设） ──
+            preset_start_y = panel_h - 64
 
             for i, preset in enumerate(self.presets):
                 col = i % max_cols
                 row = i // max_cols
-                x = 20 + col * (btn_w + gap_x)
-                y = preset_start_y - row * (btn_h + gap_y)
+                x = 20 + col * (cb_w + gap_x)
+                y = preset_start_y - row * (cb_h + gap_y)
 
-                btn = AppKit.NSButton.alloc().initWithFrame_(
-                    Foundation.NSMakeRect(x, y, btn_w, btn_h)
+                cb = AppKit.NSButton.alloc().initWithFrame_(
+                    Foundation.NSMakeRect(x, y, cb_w, cb_h)
                 )
-                btn.setTitle_(preset)
-                btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
-                btn.setFont_(AppKit.NSFont.systemFontOfSize_(13))
-                btn.setTarget_(handler)
-                btn.setAction_("presetClicked:")
-                content.addSubview_(btn)
+                cb.setTitle_(preset)
+                cb.setButtonType_(AppKit.NSButtonTypeSwitch)
+                cb.setFont_(AppKit.NSFont.systemFontOfSize_(13))
+                cb.setState_(AppKit.NSOffState)
+                content.addSubview_(cb)
+                checkboxes.append(cb)
 
             # ── 分隔线 ──
-            sep_y = preset_start_y - preset_h - 6
+            sep_y = preset_start_y - preset_h - 5
             sep = AppKit.NSBox.alloc().initWithFrame_(
                 Foundation.NSMakeRect(20, sep_y, panel_w - 40, 1)
             )
@@ -463,17 +449,18 @@ class TimeRecorder(rumps.App):
             # ── 自定义输入 ──
             input_y = sep_y - 32
             input_field = AppKit.NSTextField.alloc().initWithFrame_(
-                Foundation.NSMakeRect(20, input_y, panel_w - 40, 26)
+                Foundation.NSMakeRect(20, input_y, panel_w - 40, 24)
             )
             input_field.setPlaceholderString_("输入自定义活动…")
+            input_field.setFont_(AppKit.NSFont.systemFontOfSize_(13))
             content.addSubview_(input_field)
 
-            # 绑定 handler
-            handler.setup(input_field, result_list)
+            # ── handler & 按钮（handler 不持有任何 ObjC 对象引用）──
+            handler = _SimplePanelHandler.alloc().init()
 
-            # ── 记录按钮（蓝色风格） ──
+            # 记录按钮
             record_btn = AppKit.NSButton.alloc().initWithFrame_(
-                Foundation.NSMakeRect(panel_w - 180, 10, 80, 28)
+                Foundation.NSMakeRect(panel_w - 180, 8, 80, 28)
             )
             record_btn.setTitle_("记录")
             record_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
@@ -483,9 +470,9 @@ class TimeRecorder(rumps.App):
             record_btn.setAction_("recordClicked:")
             content.addSubview_(record_btn)
 
-            # ── 跳过按钮 ──
+            # 跳过按钮
             skip_btn = AppKit.NSButton.alloc().initWithFrame_(
-                Foundation.NSMakeRect(panel_w - 90, 10, 70, 28)
+                Foundation.NSMakeRect(panel_w - 90, 8, 70, 28)
             )
             skip_btn.setTitle_("跳过")
             skip_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
@@ -497,14 +484,32 @@ class TimeRecorder(rumps.App):
             # 默认焦点在输入框
             panel.makeFirstResponder_(input_field)
 
-            # ── 模态运行 ──
+            # ── 模态运行（handler 不碰 checkboxes/input_field，绝对安全）──
             result = AppKit.NSApplication.sharedApplication().runModalForWindow_(panel)
 
-            # 销毁面板
+            # ── 模态已结束，面板还活着：由 Python 侧读取结果 ──
+            if result == 1:
+                for cb in checkboxes:
+                    try:
+                        if cb.state() == AppKit.NSOnState:
+                            name = cb.title().strip()[:20]
+                            if name:
+                                result_list.append(name)
+                    except Exception:
+                        pass
+                try:
+                    text = input_field.stringValue().strip()[:20]
+                    if text:
+                        result_list.append(text)
+                except Exception:
+                    pass
+
+            # ── 销毁面板 ──
             panel.orderOut_(None)
             panel.release()
             panel = None
 
+            # ── 处理记录结果 ──
             if result == 1 and result_list:
                 for act in result_list:
                     self._record_activity(act)
