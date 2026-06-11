@@ -601,6 +601,8 @@ class TimeRecorder(rumps.App):
             label.setFont_(font)
         if align is not None:
             label.setAlignment_(align)
+        if hasattr(label.cell(), "setLineBreakMode_") and hasattr(AppKit, "NSLineBreakByTruncatingTail"):
+            label.cell().setLineBreakMode_(AppKit.NSLineBreakByTruncatingTail)
         return label
 
     @staticmethod
@@ -617,6 +619,45 @@ class TimeRecorder(rumps.App):
         button.setAction_(action)
         return button
 
+    @staticmethod
+    def _ui_color(AppKit, red, green, blue, alpha=1.0):
+        """按 sRGB 分量创建颜色，兼容较旧的 macOS/PyObjC。"""
+        return AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(red, green, blue, alpha)
+
+    @staticmethod
+    def _style_panel(AppKit, panel, content, background_color):
+        """统一面板的基础外观。"""
+        panel.setBackgroundColor_(background_color)
+        content.setWantsLayer_(True)
+        content.layer().setBackgroundColor_(background_color.CGColor())
+
+    @classmethod
+    def _make_card(cls, AppKit, Foundation, x, y, w, h, fill_color, border_color=None, radius=8):
+        """创建克制的浅色卡片容器。"""
+        box = AppKit.NSBox.alloc().initWithFrame_(Foundation.NSMakeRect(x, y, w, h))
+        box.setBoxType_(AppKit.NSBoxCustom)
+        box.setBorderType_(AppKit.NSLineBorder)
+        box.setCornerRadius_(radius)
+        if hasattr(box, "setFillColor_"):
+            box.setFillColor_(fill_color)
+        if border_color is not None and hasattr(box, "setBorderColor_"):
+            box.setBorderColor_(border_color)
+        return box
+
+    @classmethod
+    def _make_divider(cls, AppKit, Foundation, x, y, w):
+        """创建一条轻量分隔线。"""
+        line = AppKit.NSBox.alloc().initWithFrame_(Foundation.NSMakeRect(x, y, w, 1))
+        separator_type = getattr(AppKit, "NSBoxSeparator", None)
+        if separator_type is not None:
+            line.setBoxType_(separator_type)
+        else:
+            line.setBoxType_(AppKit.NSBoxCustom)
+            line.setBorderType_(AppKit.NSNoBorder)
+            if hasattr(line, "setFillColor_"):
+                line.setFillColor_(AppKit.NSColor.separatorColor())
+        return line
+
     def _try_panel_dialog(self):
         """原生记录面板：更稳定的生命周期 + 更清爽的输入布局。"""
         import AppKit
@@ -629,20 +670,24 @@ class TimeRecorder(rumps.App):
 
         try:
             max_cols = 3
-            cb_w, cb_h = 130, 28
-            gap_x, gap_y = 12, 8
+            cb_w, cb_h = 136, 30
+            gap_x, gap_y = 10, 8
             rows = max(1, (len(self.presets) + max_cols - 1) // max_cols)
             preset_h = rows * cb_h + max(0, rows - 1) * gap_y
 
-            panel_w = 520
+            panel_w = 560
             margin = 24
             section_w = panel_w - margin * 2
-            header_h = 72
-            preset_box_h = 56 + preset_h
-            input_box_h = 88
-            footer_h = 56
-            gap = 14
+            header_h = 58
+            preset_box_h = 42 + preset_h
+            input_box_h = 58
+            footer_h = 54
+            gap = 10
             panel_h = int(margin + header_h + gap + preset_box_h + gap + input_box_h + footer_h)
+            bg_color = self._ui_color(AppKit, 0.965, 0.965, 0.95, 1.0)
+            card_color = self._ui_color(AppKit, 1.0, 1.0, 0.985, 1.0)
+            border_color = self._ui_color(AppKit, 0.84, 0.84, 0.80, 1.0)
+            accent_color = self._ui_color(AppKit, 0.12, 0.28, 0.42, 1.0)
 
             panel = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
                 Foundation.NSMakeRect(0, 0, panel_w, panel_h),
@@ -657,6 +702,7 @@ class TimeRecorder(rumps.App):
             panel.makeKeyAndOrderFront_(None)
 
             content = panel.contentView()
+            self._style_panel(AppKit, panel, content, bg_color)
 
             title_lbl = self._make_label(
                 AppKit,
@@ -665,31 +711,17 @@ class TimeRecorder(rumps.App):
                 margin,
                 panel_h - 44,
                 section_w,
-                26,
-                font=AppKit.NSFont.boldSystemFontOfSize_(20),
+                30,
+                color=accent_color,
+                font=AppKit.NSFont.boldSystemFontOfSize_(22),
             )
             content.addSubview_(title_lbl)
 
-            hint_lbl = self._make_label(
-                AppKit,
-                Foundation,
-                "选择一个或多个预设，也可以补充自定义活动。",
-                margin,
-                panel_h - 68,
-                section_w,
-                18,
-                color=AppKit.NSColor.secondaryLabelColor(),
-                font=AppKit.NSFont.systemFontOfSize_(12),
-            )
-            content.addSubview_(hint_lbl)
-
             preset_box_y = panel_h - margin - header_h - gap - preset_box_h
-            preset_box = AppKit.NSBox.alloc().initWithFrame_(
-                Foundation.NSMakeRect(margin, preset_box_y, section_w, preset_box_h)
+            preset_box = self._make_card(
+                AppKit, Foundation, margin, preset_box_y, section_w, preset_box_h,
+                card_color, border_color,
             )
-            preset_box.setBoxType_(AppKit.NSBoxCustom)
-            preset_box.setBorderType_(AppKit.NSLineBorder)
-            preset_box.setCornerRadius_(8)
             content.addSubview_(preset_box)
 
             content.addSubview_(self._make_label(
@@ -697,24 +729,14 @@ class TimeRecorder(rumps.App):
                 Foundation,
                 "常用活动",
                 margin + 16,
-                preset_box_y + preset_box_h - 30,
+                preset_box_y + preset_box_h - 28,
                 section_w - 32,
                 18,
-                font=AppKit.NSFont.boldSystemFontOfSize_(13),
-            ))
-            content.addSubview_(self._make_label(
-                AppKit,
-                Foundation,
-                "勾选后点击记录，可同时选择多项。",
-                margin + 16,
-                preset_box_y + preset_box_h - 50,
-                section_w - 32,
-                16,
-                color=AppKit.NSColor.secondaryLabelColor(),
-                font=AppKit.NSFont.systemFontOfSize_(11),
+                color=accent_color,
+                font=AppKit.NSFont.boldSystemFontOfSize_(13.5),
             ))
 
-            preset_start_y = preset_box_y + preset_box_h - 84
+            preset_start_y = preset_box_y + preset_box_h - 60
             for i, preset in enumerate(self.presets):
                 col = i % max_cols
                 row = i // max_cols
@@ -728,44 +750,29 @@ class TimeRecorder(rumps.App):
                 )
                 cb.setTitle_(preset)
                 cb.setButtonType_(AppKit.NSButtonTypeSwitch)
-                cb.setFont_(AppKit.NSFont.systemFontOfSize_(13))
+                cb.setFont_(AppKit.NSFont.systemFontOfSize_(13.5))
                 cb.setState_(AppKit.NSOffState)
                 content.addSubview_(cb)
                 checkboxes.append(cb)
 
             input_box_y = preset_box_y - gap - input_box_h
-            input_box = AppKit.NSBox.alloc().initWithFrame_(
-                Foundation.NSMakeRect(margin, input_box_y, section_w, input_box_h)
+            input_box = self._make_card(
+                AppKit, Foundation, margin, input_box_y, section_w, input_box_h,
+                card_color, border_color,
             )
-            input_box.setBoxType_(AppKit.NSBoxCustom)
-            input_box.setBorderType_(AppKit.NSLineBorder)
-            input_box.setCornerRadius_(8)
             content.addSubview_(input_box)
 
-            input_lbl = self._make_label(
-                AppKit,
-                Foundation,
-                "自定义活动",
-                margin + 16,
-                input_box_y + input_box_h - 30,
-                section_w - 32,
-                18,
-                font=AppKit.NSFont.boldSystemFontOfSize_(13),
-            )
-            content.addSubview_(input_lbl)
-
             input_field = AppKit.NSTextField.alloc().initWithFrame_(
-                Foundation.NSMakeRect(margin + 16, input_box_y + 18, section_w - 32, 30)
+                Foundation.NSMakeRect(margin + 16, input_box_y + 13, section_w - 32, 32)
             )
-            input_field.setPlaceholderString_("例如：写文档，沟通需求；可用逗号、顿号或换行分隔")
-            input_field.setFont_(AppKit.NSFont.systemFontOfSize_(13))
+            input_field.setFont_(AppKit.NSFont.systemFontOfSize_(13.5))
             content.addSubview_(input_field)
 
             handler = _SimplePanelHandler.alloc().init()
             retained_controls = [handler]
 
             record_btn = AppKit.NSButton.alloc().initWithFrame_(
-                Foundation.NSMakeRect(panel_w - margin - 94, 18, 94, 32)
+                Foundation.NSMakeRect(panel_w - margin - 98, 14, 98, 34)
             )
             record_btn.setTitle_("记录")
             record_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
@@ -776,7 +783,7 @@ class TimeRecorder(rumps.App):
             content.addSubview_(record_btn)
 
             skip_btn = AppKit.NSButton.alloc().initWithFrame_(
-                Foundation.NSMakeRect(panel_w - margin - 94 - 12 - 74, 18, 74, 32)
+                Foundation.NSMakeRect(panel_w - margin - 98 - 12 - 78, 14, 78, 34)
             )
             skip_btn.setTitle_("跳过")
             skip_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
@@ -995,7 +1002,12 @@ class TimeRecorder(rumps.App):
 
         panel = None
         try:
-            panel_w, panel_h = 760, 620
+            panel_w, panel_h = 800, 640
+            bg_color = self._ui_color(AppKit, 0.965, 0.965, 0.95, 1.0)
+            card_color = self._ui_color(AppKit, 1.0, 1.0, 0.985, 1.0)
+            subtle_card_color = self._ui_color(AppKit, 0.982, 0.982, 0.965, 1.0)
+            border_color = self._ui_color(AppKit, 0.84, 0.84, 0.80, 1.0)
+            accent_color = self._ui_color(AppKit, 0.12, 0.28, 0.42, 1.0)
             panel = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
                 Foundation.NSMakeRect(0, 0, panel_w, panel_h),
                 AppKit.NSTitledWindowMask | AppKit.NSClosableWindowMask,
@@ -1010,98 +1022,101 @@ class TimeRecorder(rumps.App):
 
             content = panel.contentView()
             controls = []
+            self._style_panel(AppKit, panel, content, bg_color)
 
             content.addSubview_(self._make_label(
-                AppKit, Foundation, title, 28, panel_h - 48, panel_w - 56, 28,
-                font=AppKit.NSFont.boldSystemFontOfSize_(22),
+                AppKit, Foundation, title, 32, panel_h - 52, panel_w - 64, 30,
+                color=accent_color,
+                font=AppKit.NSFont.boldSystemFontOfSize_(23),
             ))
             content.addSubview_(self._make_label(
-                AppKit, Foundation, "活动分布和最近记录", 28, panel_h - 72, panel_w - 56, 18,
+                AppKit, Foundation, "活动分布、频次概览和最近记录", 32, panel_h - 78, panel_w - 64, 18,
                 color=AppKit.NSColor.secondaryLabelColor(),
-                font=AppKit.NSFont.systemFontOfSize_(12),
+                font=AppKit.NSFont.systemFontOfSize_(12.5),
             ))
 
-            metric_y = panel_h - 142
+            metric_y = panel_h - 154
             metrics = [
                 ("总记录", str(summary["total"])),
                 ("活跃天数", str(summary["active_days"])),
                 ("最高频", summary["top_activity"]),
             ]
-            card_gap = 14
-            card_w = int((panel_w - 56 - card_gap * 2) / 3)
+            card_gap = 16
+            card_w = int((panel_w - 64 - card_gap * 2) / 3)
             for i, (label, value) in enumerate(metrics):
-                x = 28 + i * (card_w + card_gap)
-                box = AppKit.NSBox.alloc().initWithFrame_(Foundation.NSMakeRect(x, metric_y, card_w, 62))
-                box.setBoxType_(AppKit.NSBoxCustom)
-                box.setBorderType_(AppKit.NSLineBorder)
-                box.setCornerRadius_(8)
-                if hasattr(box, "setFillColor_"):
-                    box.setFillColor_(AppKit.NSColor.windowBackgroundColor())
+                x = 32 + i * (card_w + card_gap)
+                box = self._make_card(
+                    AppKit, Foundation, x, metric_y, card_w, 70,
+                    card_color, border_color,
+                )
                 content.addSubview_(box)
                 controls.append(box)
                 content.addSubview_(self._make_label(
-                    AppKit, Foundation, label, x + 14, metric_y + 36, card_w - 28, 16,
+                    AppKit, Foundation, label, x + 16, metric_y + 42, card_w - 32, 16,
                     color=AppKit.NSColor.secondaryLabelColor(),
                     font=AppKit.NSFont.systemFontOfSize_(11),
                 ))
                 content.addSubview_(self._make_label(
-                    AppKit, Foundation, value, x + 14, metric_y + 10, card_w - 28, 24,
-                    font=AppKit.NSFont.boldSystemFontOfSize_(17),
+                    AppKit, Foundation, value, x + 16, metric_y + 12, card_w - 32, 26,
+                    color=accent_color,
+                    font=AppKit.NSFont.boldSystemFontOfSize_(18),
                 ))
 
             total = max(1, summary["total"])
-            section_y = 66
-            section_h = metric_y - section_y - 22
-            left_x = 28
-            gap = 16
-            left_w = int((panel_w - 56 - gap) * 0.58)
+            section_y = 70
+            section_h = metric_y - section_y - 26
+            left_x = 32
+            gap = 18
+            left_w = int((panel_w - 64 - gap) * 0.58)
             right_x = left_x + left_w + gap
-            right_w = panel_w - 28 - right_x
+            right_w = panel_w - 32 - right_x
 
             for x, w, heading, subheading in [
                 (left_x, left_w, "活动分布", f"{len(summary['counts'])} 个活动类型"),
                 (right_x, right_w, "最近记录", f"最近 {len(summary['recent'])} 条"),
             ]:
-                box = AppKit.NSBox.alloc().initWithFrame_(Foundation.NSMakeRect(x, section_y, w, section_h))
-                box.setBoxType_(AppKit.NSBoxCustom)
-                box.setBorderType_(AppKit.NSLineBorder)
-                box.setCornerRadius_(8)
-                if hasattr(box, "setFillColor_"):
-                    box.setFillColor_(AppKit.NSColor.windowBackgroundColor())
+                box = self._make_card(
+                    AppKit, Foundation, x, section_y, w, section_h,
+                    card_color, border_color,
+                )
                 content.addSubview_(box)
                 controls.append(box)
                 content.addSubview_(self._make_label(
-                    AppKit, Foundation, heading, x + 16, section_y + section_h - 32, w - 32, 20,
-                    font=AppKit.NSFont.boldSystemFontOfSize_(14),
+                    AppKit, Foundation, heading, x + 16, section_y + section_h - 34, w - 32, 20,
+                    color=accent_color,
+                    font=AppKit.NSFont.boldSystemFontOfSize_(14.5),
                 ))
                 content.addSubview_(self._make_label(
-                    AppKit, Foundation, subheading, x + 16, section_y + section_h - 52, w - 32, 16,
+                    AppKit, Foundation, subheading, x + 16, section_y + section_h - 54, w - 32, 16,
                     color=AppKit.NSColor.secondaryLabelColor(),
                     font=AppKit.NSFont.systemFontOfSize_(11),
                     align=AppKit.NSRightTextAlignment,
                 ))
+                content.addSubview_(self._make_divider(
+                    AppKit, Foundation, x + 16, section_y + section_h - 64, w - 32
+                ))
 
-            dist_scroll_y = section_y + 14
-            dist_scroll_h = section_h - 66
+            dist_scroll_y = section_y + 16
+            dist_scroll_h = section_h - 86
             dist_scroll = AppKit.NSScrollView.alloc().initWithFrame_(
-                Foundation.NSMakeRect(left_x + 14, dist_scroll_y, left_w - 28, dist_scroll_h)
+                Foundation.NSMakeRect(left_x + 16, dist_scroll_y, left_w - 32, dist_scroll_h)
             )
             dist_scroll.setHasVerticalScroller_(True)
             dist_scroll.setBorderType_(AppKit.NSNoBorder)
             dist_scroll.setDrawsBackground_(False)
-            dist_doc_h = max(dist_scroll_h, len(summary["counts"]) * 36 + 8)
+            dist_doc_h = max(dist_scroll_h, len(summary["counts"]) * 42 + 8)
             dist_doc = AppKit.NSView.alloc().initWithFrame_(
-                Foundation.NSMakeRect(0, 0, left_w - 44, dist_doc_h)
+                Foundation.NSMakeRect(0, 0, left_w - 52, dist_doc_h)
             )
-            row_y = dist_doc_h - 30
+            row_y = dist_doc_h - 34
             for act, count in summary["counts"]:
                 pct = count / total * 100
                 dist_doc.addSubview_(self._make_label(
-                    AppKit, Foundation, act, 0, row_y + 1, 150, 18,
-                    font=AppKit.NSFont.systemFontOfSize_(12),
+                    AppKit, Foundation, act, 0, row_y + 8, 158, 18,
+                    font=AppKit.NSFont.systemFontOfSize_(12.5),
                 ))
                 bar = AppKit.NSProgressIndicator.alloc().initWithFrame_(
-                    Foundation.NSMakeRect(162, row_y + 4, max(100, left_w - 292), 10)
+                    Foundation.NSMakeRect(166, row_y + 11, max(110, left_w - 314), 10)
                 )
                 bar.setIndeterminate_(False)
                 bar.setMinValue_(0)
@@ -1111,43 +1126,50 @@ class TimeRecorder(rumps.App):
                 dist_doc.addSubview_(bar)
                 controls.append(bar)
                 dist_doc.addSubview_(self._make_label(
-                    AppKit, Foundation, f"{count}次  {pct:.0f}%", left_w - 126, row_y + 1, 82, 18,
+                    AppKit, Foundation, f"{count}次  {pct:.0f}%", left_w - 138, row_y + 8, 86, 18,
                     color=AppKit.NSColor.secondaryLabelColor(),
                     font=AppKit.NSFont.systemFontOfSize_(12),
                     align=AppKit.NSRightTextAlignment,
                 ))
-                row_y -= 36
+                row_y -= 42
             dist_scroll.setDocumentView_(dist_doc)
             content.addSubview_(dist_scroll)
 
             scroll = AppKit.NSScrollView.alloc().initWithFrame_(
-                Foundation.NSMakeRect(right_x + 14, section_y + 14, right_w - 28, section_h - 66)
+                Foundation.NSMakeRect(right_x + 16, section_y + 16, right_w - 32, section_h - 86)
             )
             scroll.setHasVerticalScroller_(True)
             scroll.setBorderType_(AppKit.NSNoBorder)
             scroll.setDrawsBackground_(False)
-            recent_doc_h = max(section_h - 66, len(summary["recent"]) * 30 + 8)
+            recent_doc_h = max(section_h - 86, len(summary["recent"]) * 34 + 8)
             recent_doc = AppKit.NSView.alloc().initWithFrame_(
-                Foundation.NSMakeRect(0, 0, right_w - 44, recent_doc_h)
+                Foundation.NSMakeRect(0, 0, right_w - 52, recent_doc_h)
             )
-            row_y = recent_doc_h - 26
+            row_y = recent_doc_h - 30
             for activity in summary["recent"]:
+                row_bg = self._make_card(
+                    AppKit, Foundation, 0, row_y - 3, right_w - 54, 28,
+                    subtle_card_color, None, radius=6,
+                )
+                row_bg.setBorderType_(AppKit.NSNoBorder)
+                recent_doc.addSubview_(row_bg)
+                controls.append(row_bg)
                 recent_doc.addSubview_(self._make_label(
-                    AppKit, Foundation, activity.get("time", ""), 0, row_y, 46, 18,
+                    AppKit, Foundation, activity.get("time", ""), 10, row_y + 2, 46, 18,
                     color=AppKit.NSColor.secondaryLabelColor(),
                     font=AppKit.NSFont.monospacedSystemFontOfSize_weight_(12, 0),
                 ))
                 recent_doc.addSubview_(self._make_label(
-                    AppKit, Foundation, activity.get("activity", ""), 58, row_y, right_w - 106, 18,
-                    font=AppKit.NSFont.systemFontOfSize_(12),
+                    AppKit, Foundation, activity.get("activity", ""), 66, row_y + 2, right_w - 130, 18,
+                    font=AppKit.NSFont.systemFontOfSize_(12.5),
                 ))
-                row_y -= 30
+                row_y -= 34
             scroll.setDocumentView_(recent_doc)
             content.addSubview_(scroll)
 
             handler = _SimplePanelHandler.alloc().init()
             close_btn = self._make_button(
-                AppKit, Foundation, "关闭", panel_w - 96, 18, 72, 32,
+                AppKit, Foundation, "关闭", panel_w - 108, 22, 76, 32,
                 handler, "closeClicked:", bold=False,
             )
             content.addSubview_(close_btn)
