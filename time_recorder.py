@@ -12,7 +12,7 @@
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.4.2"
+__version__ = "1.4.3"
 __app_name__ = "⏰ 时间记录器"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
@@ -45,6 +45,10 @@ try:
             """点击跳过 → 直接结束模态，返回 code=0"""
             AppKit.NSApplication.sharedApplication().stopModalWithCode_(0)
 
+        def closeClicked_(self, sender):
+            """关闭统计窗口"""
+            AppKit.NSApplication.sharedApplication().stopModalWithCode_(0)
+
     _PANEL_HANDLER_CLS = _SimplePanelHandler
 except Exception:
     _PANEL_HANDLER_CLS = None
@@ -55,9 +59,77 @@ except Exception:
 DEFAULT_INTERVAL = 5           # 弹窗间隔（分钟，默认 5min 方便测试）
 DEFAULT_IDLE_THRESHOLD = 5     # 空闲阈值（分钟），超过此值视为电脑无人使用
 DEFAULT_PRESETS = ["写代码", "开会", "阅读", "学习", "思考", "摸鱼"]
+MAX_ACTIVITY_LENGTH = 20
+MAX_PRESETS = 20
 
 CONFIG_DIR = os.path.expanduser("~")
 CONFIG_FILE = os.path.join(CONFIG_DIR, ".time_recorder.json")
+
+
+def normalize_activity_name(text):
+    """清洗单条活动名称，返回最多 MAX_ACTIVITY_LENGTH 个字符。"""
+    return re.sub(r"\s+", " ", str(text or "").strip())[:MAX_ACTIVITY_LENGTH]
+
+
+def parse_activity_input(text, presets):
+    """解析逗号/换行/顿号分隔的活动输入，支持预设编号并自动去重。"""
+    activities = []
+    seen = set()
+    parts = re.split(r"[,，、\n]+", text or "")
+    for part in parts:
+        raw = part.strip()
+        if not raw:
+            continue
+
+        activity = raw
+        if raw.isdigit():
+            idx = int(raw) - 1
+            if 0 <= idx < len(presets):
+                activity = presets[idx]
+
+        activity = normalize_activity_name(activity)
+        if activity and activity not in seen:
+            activities.append(activity)
+            seen.add(activity)
+    return activities
+
+
+def build_activity_summary(activities):
+    """生成统计页使用的聚合数据。"""
+    counts = {}
+    for activity in activities:
+        name = activity.get("activity", "")
+        counts[name] = counts.get(name, 0) + 1
+
+    total = len(activities)
+    sorted_counts = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    top_activity = sorted_counts[0][0] if sorted_counts else "暂无"
+    active_days = len({activity.get("date") for activity in activities if activity.get("date")})
+    recent = list(reversed(activities[-30:]))
+
+    return {
+        "total": total,
+        "active_days": active_days,
+        "top_activity": top_activity,
+        "counts": sorted_counts,
+        "recent": recent,
+    }
+
+
+def safe_alert(**kwargs):
+    """显示提示框；在非打包/无通知权限环境下避免异常影响主流程。"""
+    try:
+        return rumps.alert(**kwargs)
+    except Exception:
+        return None
+
+
+def safe_notification(**kwargs):
+    """发送系统通知；失败时静默跳过，记录数据不能因此丢失。"""
+    try:
+        rumps.notification(**kwargs)
+    except Exception:
+        pass
 
 
 def get_idle_time():
@@ -271,7 +343,7 @@ class TimeRecorder(rumps.App):
         """删除预设（点击预设项即删除）"""
         idx = sender._preset_index
         name = self.presets[idx]
-        result = rumps.alert(
+        result = safe_alert(
             title="确认删除",
             message=f"确定删除预设「{name}」？",
             ok="删除",
@@ -284,8 +356,8 @@ class TimeRecorder(rumps.App):
 
     def _on_add_preset(self, _):
         """添加新预设"""
-        if len(self.presets) >= 20:
-            rumps.alert(title="提示", message="最多支持 20 个预设选项")
+        if len(self.presets) >= MAX_PRESETS:
+            safe_alert(title="提示", message=f"最多支持 {MAX_PRESETS} 个预设选项")
             return
 
         win = rumps.Window(
@@ -296,12 +368,12 @@ class TimeRecorder(rumps.App):
         )
         response = win.run()
         if response.clicked:
-            name = response.text.strip()
+            name = normalize_activity_name(response.text)
             if not name:
-                rumps.alert(title="提示", message="名称不能为空")
+                safe_alert(title="提示", message="名称不能为空")
                 return
             if name in self.presets:
-                rumps.alert(title="提示", message=f"「{name}」已存在")
+                safe_alert(title="提示", message=f"「{name}」已存在")
                 return
             self.presets.append(name)
             self._rebuild_presets_menu()
@@ -309,7 +381,7 @@ class TimeRecorder(rumps.App):
 
     def _on_reset_presets(self, _):
         """恢复默认预设"""
-        result = rumps.alert(
+        result = safe_alert(
             title="确认恢复默认",
             message="将恢复默认预设选项列表，确认？",
             ok="确认",
@@ -365,71 +437,152 @@ class TimeRecorder(rumps.App):
         self.last_check_time = datetime.datetime.now().isoformat()
         self._save_config()
 
-        # 尝试原生面板，失败时回退到文本对话框
-        if not self._try_panel_dialog():
-            self._show_fallback_dialog()
+        try:
+            # 尝试原生面板，失败时回退到文本对话框
+            if not self._try_panel_dialog():
+                self._show_fallback_dialog()
+        finally:
+            self.recording_lock = False
 
-        self.recording_lock = False
+    @staticmethod
+    def _make_label(AppKit, Foundation, text, x, y, w, h, color=None, font=None, align=None):
+        """创建不可编辑文本标签。"""
+        label = AppKit.NSTextField.alloc().initWithFrame_(Foundation.NSMakeRect(x, y, w, h))
+        label.setStringValue_(text)
+        label.setBezeled_(False)
+        label.setDrawsBackground_(False)
+        label.setEditable_(False)
+        label.setSelectable_(False)
+        if color is not None:
+            label.setTextColor_(color)
+        if font is not None:
+            label.setFont_(font)
+        if align is not None:
+            label.setAlignment_(align)
+        return label
+
+    @staticmethod
+    def _make_button(AppKit, Foundation, text, x, y, w, h, handler, action, bold=False):
+        """创建原生按钮并绑定 handler。"""
+        button = AppKit.NSButton.alloc().initWithFrame_(Foundation.NSMakeRect(x, y, w, h))
+        button.setTitle_(text)
+        button.setBezelStyle_(AppKit.NSBezelStyleRounded)
+        button.setFont_(
+            AppKit.NSFont.boldSystemFontOfSize_(13)
+            if bold else AppKit.NSFont.systemFontOfSize_(13)
+        )
+        button.setTarget_(handler)
+        button.setAction_(action)
+        return button
 
     def _try_panel_dialog(self):
-        """简化版原生面板——复选框勾选 + 自定义输入，点记录统一提交。
-        回调只负责结束模态；面板内容在模态结束后、释放前由 Python 读取。
-        返回 True 表示成功完成，False 表示失败需回退。"""
+        """原生记录面板：更稳定的生命周期 + 更清爽的输入布局。"""
         import AppKit
         import Foundation
 
         panel = None
-        checkboxes = []   # 本地引用，不断给 handler
+        checkboxes = []
         input_field = None
         result_list = []
 
         try:
-            # ── 布局计算 ──
             max_cols = 3
-            cb_w, cb_h = 110, 24
-            gap_x, gap_y = 8, 6
-            rows = (len(self.presets) + max_cols - 1) // max_cols
+            cb_w, cb_h = 130, 28
+            gap_x, gap_y = 12, 8
+            rows = max(1, (len(self.presets) + max_cols - 1) // max_cols)
             preset_h = rows * cb_h + max(0, rows - 1) * gap_y
 
-            panel_w = 400
-            panel_h = int(46 + preset_h + 10 + 1 + 8 + 28 + 12 + 34)
+            panel_w = 520
+            margin = 24
+            section_w = panel_w - margin * 2
+            header_h = 72
+            preset_box_h = 56 + preset_h
+            input_box_h = 88
+            footer_h = 56
+            gap = 14
+            panel_h = int(margin + header_h + gap + preset_box_h + gap + input_box_h + footer_h)
 
-            # ── 创建面板 ──
             panel = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
                 Foundation.NSMakeRect(0, 0, panel_w, panel_h),
                 AppKit.NSTitledWindowMask | AppKit.NSClosableWindowMask,
                 AppKit.NSBackingStoreBuffered,
                 False,
             )
-            panel.setTitle_("⏰ 时间记录")
+            panel.setTitle_("时间记录")
             panel.setFloatingPanel_(True)
+            panel.setReleasedWhenClosed_(False)
             panel.center()
             panel.makeKeyAndOrderFront_(None)
 
             content = panel.contentView()
 
-            # ── 标题 ──
-            title_lbl = AppKit.NSTextField.alloc().initWithFrame_(
-                Foundation.NSMakeRect(20, panel_h - 38, panel_w - 40, 22)
+            title_lbl = self._make_label(
+                AppKit,
+                Foundation,
+                "现在在做什么？",
+                margin,
+                panel_h - 44,
+                section_w,
+                26,
+                font=AppKit.NSFont.boldSystemFontOfSize_(20),
             )
-            title_lbl.setStringValue_("现在在做什么？")
-            title_lbl.setBezeled_(False)
-            title_lbl.setDrawsBackground_(False)
-            title_lbl.setEditable_(False)
-            title_lbl.setFont_(AppKit.NSFont.boldSystemFontOfSize_(14))
             content.addSubview_(title_lbl)
 
-            # ── 复选框（勾选预设） ──
-            preset_start_y = panel_h - 64
+            hint_lbl = self._make_label(
+                AppKit,
+                Foundation,
+                "选择一个或多个预设，也可以补充自定义活动。",
+                margin,
+                panel_h - 68,
+                section_w,
+                18,
+                color=AppKit.NSColor.secondaryLabelColor(),
+                font=AppKit.NSFont.systemFontOfSize_(12),
+            )
+            content.addSubview_(hint_lbl)
 
+            preset_box_y = panel_h - margin - header_h - gap - preset_box_h
+            preset_box = AppKit.NSBox.alloc().initWithFrame_(
+                Foundation.NSMakeRect(margin, preset_box_y, section_w, preset_box_h)
+            )
+            preset_box.setBoxType_(AppKit.NSBoxCustom)
+            preset_box.setBorderType_(AppKit.NSLineBorder)
+            preset_box.setCornerRadius_(8)
+            content.addSubview_(preset_box)
+
+            content.addSubview_(self._make_label(
+                AppKit,
+                Foundation,
+                "常用活动",
+                margin + 16,
+                preset_box_y + preset_box_h - 30,
+                section_w - 32,
+                18,
+                font=AppKit.NSFont.boldSystemFontOfSize_(13),
+            ))
+            content.addSubview_(self._make_label(
+                AppKit,
+                Foundation,
+                "勾选后点击记录，可同时选择多项。",
+                margin + 16,
+                preset_box_y + preset_box_h - 50,
+                section_w - 32,
+                16,
+                color=AppKit.NSColor.secondaryLabelColor(),
+                font=AppKit.NSFont.systemFontOfSize_(11),
+            ))
+
+            preset_start_y = preset_box_y + preset_box_h - 84
             for i, preset in enumerate(self.presets):
                 col = i % max_cols
                 row = i // max_cols
-                x = 20 + col * (cb_w + gap_x)
-                y = preset_start_y - row * (cb_h + gap_y)
-
                 cb = AppKit.NSButton.alloc().initWithFrame_(
-                    Foundation.NSMakeRect(x, y, cb_w, cb_h)
+                    Foundation.NSMakeRect(
+                        margin + 16 + col * (cb_w + gap_x),
+                        preset_start_y - row * (cb_h + gap_y),
+                        cb_w,
+                        cb_h,
+                    )
                 )
                 cb.setTitle_(preset)
                 cb.setButtonType_(AppKit.NSButtonTypeSwitch)
@@ -438,29 +591,39 @@ class TimeRecorder(rumps.App):
                 content.addSubview_(cb)
                 checkboxes.append(cb)
 
-            # ── 分隔线 ──
-            sep_y = preset_start_y - preset_h - 5
-            sep = AppKit.NSBox.alloc().initWithFrame_(
-                Foundation.NSMakeRect(20, sep_y, panel_w - 40, 1)
+            input_box_y = preset_box_y - gap - input_box_h
+            input_box = AppKit.NSBox.alloc().initWithFrame_(
+                Foundation.NSMakeRect(margin, input_box_y, section_w, input_box_h)
             )
-            sep.setBoxType_(AppKit.NSBoxSeparator)
-            content.addSubview_(sep)
+            input_box.setBoxType_(AppKit.NSBoxCustom)
+            input_box.setBorderType_(AppKit.NSLineBorder)
+            input_box.setCornerRadius_(8)
+            content.addSubview_(input_box)
 
-            # ── 自定义输入 ──
-            input_y = sep_y - 32
-            input_field = AppKit.NSTextField.alloc().initWithFrame_(
-                Foundation.NSMakeRect(20, input_y, panel_w - 40, 24)
+            input_lbl = self._make_label(
+                AppKit,
+                Foundation,
+                "自定义活动",
+                margin + 16,
+                input_box_y + input_box_h - 30,
+                section_w - 32,
+                18,
+                font=AppKit.NSFont.boldSystemFontOfSize_(13),
             )
-            input_field.setPlaceholderString_("输入自定义活动…")
+            content.addSubview_(input_lbl)
+
+            input_field = AppKit.NSTextField.alloc().initWithFrame_(
+                Foundation.NSMakeRect(margin + 16, input_box_y + 18, section_w - 32, 30)
+            )
+            input_field.setPlaceholderString_("例如：写文档，沟通需求；可用逗号、顿号或换行分隔")
             input_field.setFont_(AppKit.NSFont.systemFontOfSize_(13))
             content.addSubview_(input_field)
 
-            # ── handler & 按钮（handler 不持有任何 ObjC 对象引用）──
             handler = _SimplePanelHandler.alloc().init()
+            retained_controls = [handler]
 
-            # 记录按钮
             record_btn = AppKit.NSButton.alloc().initWithFrame_(
-                Foundation.NSMakeRect(panel_w - 180, 8, 80, 28)
+                Foundation.NSMakeRect(panel_w - margin - 94, 18, 94, 32)
             )
             record_btn.setTitle_("记录")
             record_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
@@ -470,9 +633,8 @@ class TimeRecorder(rumps.App):
             record_btn.setAction_("recordClicked:")
             content.addSubview_(record_btn)
 
-            # 跳过按钮
             skip_btn = AppKit.NSButton.alloc().initWithFrame_(
-                Foundation.NSMakeRect(panel_w - 90, 8, 70, 28)
+                Foundation.NSMakeRect(panel_w - margin - 94 - 12 - 74, 18, 74, 32)
             )
             skip_btn.setTitle_("跳过")
             skip_btn.setBezelStyle_(AppKit.NSBezelStyleRounded)
@@ -481,37 +643,30 @@ class TimeRecorder(rumps.App):
             skip_btn.setAction_("skipClicked:")
             content.addSubview_(skip_btn)
 
-            # 默认焦点在输入框
+            retained_controls.extend([record_btn, skip_btn])
             panel.makeFirstResponder_(input_field)
 
-            # ── 模态运行（handler 不碰 checkboxes/input_field，绝对安全）──
             result = AppKit.NSApplication.sharedApplication().runModalForWindow_(panel)
 
-            # ── 模态已结束，面板还活着：由 Python 侧读取结果 ──
             if result == 1:
                 for cb in checkboxes:
                     try:
                         if cb.state() == AppKit.NSOnState:
-                            name = cb.title().strip()[:20]
+                            name = normalize_activity_name(cb.title())
                             if name:
                                 result_list.append(name)
                     except Exception:
                         pass
                 try:
-                    text = input_field.stringValue().strip()[:20]
-                    if text:
-                        result_list.append(text)
+                    result_list.extend(parse_activity_input(input_field.stringValue(), self.presets))
                 except Exception:
                     pass
 
-            # ── 销毁面板 ──
             panel.orderOut_(None)
-            panel.release()
             panel = None
 
-            # ── 处理记录结果 ──
             if result == 1 and result_list:
-                for act in result_list:
+                for act in dict.fromkeys(result_list):
                     self._record_activity(act)
             return True
 
@@ -519,7 +674,6 @@ class TimeRecorder(rumps.App):
             if panel is not None:
                 try:
                     panel.orderOut_(None)
-                    panel.release()
                 except Exception:
                     pass
             import sys as _sys
@@ -537,7 +691,7 @@ class TimeRecorder(rumps.App):
             title="⏰ 时间记录",
             message=(
                 f"距离上次记录已过去 {self.interval_minutes} 分钟\n"
-                f"现在在做什么？多个活动用逗号分隔\n\n"
+                f"现在在做什么？多个活动用逗号、顿号或换行分隔\n\n"
                 f"📋 预设选项（输入数字快速选择）：\n"
                 f"{presets_hint}\n\n"
                 f"或直接输入自定义活动："
@@ -553,20 +707,7 @@ class TimeRecorder(rumps.App):
             if not text:
                 return
 
-            activities = []
-            for part in text.replace("，", ",").split(","):
-                part = part.strip()
-                if not part:
-                    continue
-                # 检测是否为预设编号
-                activity = part
-                if part.isdigit():
-                    idx = int(part) - 1
-                    if 0 <= idx < len(self.presets):
-                        activity = self.presets[idx]
-                activities.append(activity[:20])
-
-            for act in activities:
+            for act in parse_activity_input(text, self.presets):
                 self._record_activity(act)
 
     def trigger_record(self, _):
@@ -578,7 +719,7 @@ class TimeRecorder(rumps.App):
         now = datetime.datetime.now()
         self.last_check_time = (now - datetime.timedelta(minutes=self.interval_minutes + 1)).isoformat()
         self._save_config()
-        rumps.notification(
+        safe_notification(
             title="⏱ 计时器已重置",
             subtitle=f"将在 {self.interval_minutes} 分钟内弹窗",
             message="（若空闲检测开启且电脑空闲中则跳过）",
@@ -587,7 +728,7 @@ class TimeRecorder(rumps.App):
 
     def _clear_all_activities(self, _):
         """清空全部记录（测试用）"""
-        result = rumps.alert(
+        result = safe_alert(
             title="⚠️ 确认清空",
             message=f"将删除全部 {len(self.activities)} 条活动记录，此操作不可撤销！",
             ok="清空",
@@ -597,7 +738,7 @@ class TimeRecorder(rumps.App):
             self.activities = []
             self._save_config()
             self._update_last_activity()
-            rumps.notification(
+            safe_notification(
                 title="🗑 已清空",
                 subtitle="全部活动记录已删除",
                 message="",
@@ -617,7 +758,7 @@ class TimeRecorder(rumps.App):
         self._save_config()
         self._update_last_activity()
 
-        rumps.notification(
+        safe_notification(
             title="✅ 已记录",
             subtitle=f"当前活动: {activity}",
             message="",
@@ -654,34 +795,168 @@ class TimeRecorder(rumps.App):
     def _summarize_activities(self, activities, title):
         """格式化展示活动汇总"""
         if not activities:
-            rumps.alert(title=title, message="暂无记录 🫥")
+            safe_alert(title=title, message="暂无记录 🫥")
             return
 
-        # 按活动名称聚合统计
-        counts = {}
-        for a in activities:
-            act = a["activity"]
-            counts[act] = counts.get(act, 0) + 1
+        summary = build_activity_summary(activities)
+        if not self._try_summary_panel(summary, title):
+            safe_alert(title=title, message=self._format_summary_text(summary))
 
-        sorted_acts = sorted(counts.items(), key=lambda x: -x[1])
-        total = len(activities)
-
-        lines = [f"共 {total} 条记录\n"]
-        for act, count in sorted_acts:
+    def _format_summary_text(self, summary):
+        """统计页原生窗口失败时的文本兜底。"""
+        total = summary["total"]
+        lines = [
+            f"共 {total} 条记录",
+            f"活跃天数: {summary['active_days']}",
+            f"最高频: {summary['top_activity']}",
+            "",
+            "活动分布",
+        ]
+        for act, count in summary["counts"]:
             pct = count / total * 100
-            bar_len = max(1, int(pct / 5))
-            bar = "█" * bar_len
+            bar = "█" * max(1, int(pct / 5))
             lines.append(f"{bar} {act}: {count}次 ({pct:.0f}%)")
 
-        # 时间线（最近 20 条）
-        lines.append(f"\n── 时间线（最近）──")
-        recent = activities[-20:]
-        for a in recent:
-            lines.append(f"  {a['time']}  {a['activity']}")
-        if total > 20:
-            lines.append(f"  ... 共 {total} 条")
+        lines.append("\n最近记录")
+        for activity in summary["recent"][:20]:
+            lines.append(f"  {activity.get('date', '')} {activity.get('time', '')}  {activity.get('activity', '')}")
+        return "\n".join(lines)
 
-        rumps.alert(title=title, message="\n".join(lines))
+    def _try_summary_panel(self, summary, title):
+        """原生统计窗口。"""
+        import AppKit
+        import Foundation
+
+        panel = None
+        try:
+            panel_w, panel_h = 600, 560
+            panel = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
+                Foundation.NSMakeRect(0, 0, panel_w, panel_h),
+                AppKit.NSTitledWindowMask | AppKit.NSClosableWindowMask,
+                AppKit.NSBackingStoreBuffered,
+                False,
+            )
+            panel.setTitle_(title)
+            panel.setFloatingPanel_(True)
+            panel.setReleasedWhenClosed_(False)
+            panel.center()
+            panel.makeKeyAndOrderFront_(None)
+
+            content = panel.contentView()
+
+            content.addSubview_(self._make_label(
+                AppKit, Foundation, title, 24, panel_h - 44, panel_w - 48, 26,
+                font=AppKit.NSFont.boldSystemFontOfSize_(20),
+            ))
+            content.addSubview_(self._make_label(
+                AppKit, Foundation, "活动分布和最近记录", 24, panel_h - 68, panel_w - 48, 18,
+                color=AppKit.NSColor.secondaryLabelColor(),
+                font=AppKit.NSFont.systemFontOfSize_(12),
+            ))
+
+            metric_y = panel_h - 122
+            metrics = [
+                ("总记录", str(summary["total"])),
+                ("活跃天数", str(summary["active_days"])),
+                ("最高频", summary["top_activity"]),
+            ]
+            card_w = 176
+            for i, (label, value) in enumerate(metrics):
+                x = 24 + i * (card_w + 12)
+                box = AppKit.NSBox.alloc().initWithFrame_(Foundation.NSMakeRect(x, metric_y, card_w, 52))
+                box.setBoxType_(AppKit.NSBoxCustom)
+                box.setBorderType_(AppKit.NSLineBorder)
+                box.setCornerRadius_(8)
+                content.addSubview_(box)
+                content.addSubview_(self._make_label(
+                    AppKit, Foundation, label, x + 12, metric_y + 28, card_w - 24, 16,
+                    color=AppKit.NSColor.secondaryLabelColor(),
+                    font=AppKit.NSFont.systemFontOfSize_(11),
+                ))
+                content.addSubview_(self._make_label(
+                    AppKit, Foundation, value, x + 12, metric_y + 8, card_w - 24, 22,
+                    font=AppKit.NSFont.boldSystemFontOfSize_(15),
+                ))
+
+            distribution_title_y = metric_y - 38
+            content.addSubview_(self._make_label(
+                AppKit, Foundation, "活动分布", 24, distribution_title_y, panel_w - 48, 20,
+                font=AppKit.NSFont.boldSystemFontOfSize_(14),
+            ))
+
+            total = max(1, summary["total"])
+            row_y = distribution_title_y - 32
+            max_rows = 8
+            for act, count in summary["counts"][:max_rows]:
+                pct = count / total * 100
+                content.addSubview_(self._make_label(
+                    AppKit, Foundation, act, 24, row_y, 130, 18,
+                    font=AppKit.NSFont.systemFontOfSize_(12),
+                ))
+                bar = AppKit.NSProgressIndicator.alloc().initWithFrame_(
+                    Foundation.NSMakeRect(160, row_y + 2, 310, 12)
+                )
+                bar.setIndeterminate_(False)
+                bar.setMinValue_(0)
+                bar.setMaxValue_(100)
+                bar.setDoubleValue_(pct)
+                bar.setStyle_(AppKit.NSProgressIndicatorBarStyle)
+                content.addSubview_(bar)
+                content.addSubview_(self._make_label(
+                    AppKit, Foundation, f"{count}次  {pct:.0f}%", 482, row_y, 88, 18,
+                    color=AppKit.NSColor.secondaryLabelColor(),
+                    font=AppKit.NSFont.systemFontOfSize_(12),
+                    align=AppKit.NSRightTextAlignment,
+                ))
+                row_y -= 28
+
+            timeline_y = row_y - 18
+            content.addSubview_(self._make_label(
+                AppKit, Foundation, "最近记录", 24, timeline_y, panel_w - 48, 20,
+                font=AppKit.NSFont.boldSystemFontOfSize_(14),
+            ))
+
+            timeline_text = "\n".join(
+                f"{activity.get('date', '')}  {activity.get('time', '')}    {activity.get('activity', '')}"
+                for activity in summary["recent"]
+            )
+            scroll = AppKit.NSScrollView.alloc().initWithFrame_(
+                Foundation.NSMakeRect(24, 66, panel_w - 48, max(120, timeline_y - 78))
+            )
+            scroll.setHasVerticalScroller_(True)
+            scroll.setBorderType_(AppKit.NSBezelBorder)
+            text_view = AppKit.NSTextView.alloc().initWithFrame_(
+                Foundation.NSMakeRect(0, 0, panel_w - 58, max(120, timeline_y - 78))
+            )
+            text_view.setString_(timeline_text)
+            text_view.setEditable_(False)
+            text_view.setSelectable_(True)
+            text_view.setFont_(AppKit.NSFont.monospacedSystemFontOfSize_weight_(12, 0))
+            text_view.setTextColor_(AppKit.NSColor.labelColor())
+            text_view.setBackgroundColor_(AppKit.NSColor.textBackgroundColor())
+            scroll.setDocumentView_(text_view)
+            content.addSubview_(scroll)
+
+            handler = _SimplePanelHandler.alloc().init()
+            close_btn = self._make_button(
+                AppKit, Foundation, "关闭", panel_w - 96, 18, 72, 32,
+                handler, "closeClicked:", bold=False,
+            )
+            content.addSubview_(close_btn)
+            retained_controls = [handler, close_btn, text_view, scroll]
+
+            AppKit.NSApplication.sharedApplication().runModalForWindow_(panel)
+            panel.orderOut_(None)
+            return True
+        except Exception as e:
+            if panel is not None:
+                try:
+                    panel.orderOut_(None)
+                except Exception:
+                    pass
+            import sys as _sys
+            _sys.stderr.write(f"[TimeRecorder] Summary panel fallback: {e}\n")
+            return False
 
     def show_today_summary(self, _):
         """显示今日汇总"""
@@ -730,12 +1005,12 @@ class TimeRecorder(rumps.App):
                 release_url = data.get("html_url", f"{__repo_url__}/releases")
 
             if not latest_tag:
-                rumps.alert(title="🔄 检查更新", message="未能获取版本信息，请稍后重试")
+                safe_alert(title="🔄 检查更新", message="未能获取版本信息，请稍后重试")
                 return
 
             cmp = self._compare_versions(latest_tag, __version__)
             if cmp > 0:
-                rumps.alert(
+                safe_alert(
                     title="🔄 发现新版本！",
                     message=(
                         f"当前版本: v{__version__}\n"
@@ -745,19 +1020,19 @@ class TimeRecorder(rumps.App):
                     ),
                 )
             else:
-                rumps.alert(title="🔄 检查更新", message=f"当前版本: v{__version__}\n已是最新版本 🎉")
+                safe_alert(title="🔄 检查更新", message=f"当前版本: v{__version__}\n已是最新版本 🎉")
         except urllib.error.URLError:
-            rumps.alert(title="🔄 检查更新", message="网络连接失败，请检查网络后重试")
+            safe_alert(title="🔄 检查更新", message="网络连接失败，请检查网络后重试")
         except json.JSONDecodeError:
-            rumps.alert(title="🔄 检查更新", message="解析版本响应失败，请稍后重试")
+            safe_alert(title="🔄 检查更新", message="解析版本响应失败，请稍后重试")
         except Exception as e:
-            rumps.alert(title="🔄 检查更新", message=f"检查失败: {e}")
+            safe_alert(title="🔄 检查更新", message=f"检查失败: {e}")
         finally:
             self.update_item.title = "🔄 检查更新"
 
     def show_about(self, _):
         """关于信息"""
-        rumps.alert(
+        safe_alert(
             title=f"⏰ 时间记录器 v{__version__}",
             message=(
                 "macOS 菜单栏活动记录器\n\n"

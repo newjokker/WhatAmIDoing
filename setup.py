@@ -7,6 +7,7 @@ from setuptools import setup
 
 APP = ["time_recorder.py"]
 DATA_FILES = []
+VERSION = "1.4.3"
 OPTIONS = {
     "argv_emulation": False,
     "iconfile": "icon.icns",
@@ -14,8 +15,8 @@ OPTIONS = {
         "CFBundleName": "时间记录器",
         "CFBundleDisplayName": "⏰ 时间记录器",
         "CFBundleIdentifier": "com.timerecorder.app",
-        "CFBundleVersion": "1.0.0",
-        "CFBundleShortVersionString": "1.0.0",
+        "CFBundleVersion": VERSION,
+        "CFBundleShortVersionString": VERSION,
         "CFBundleExecutable": "time_recorder",
         "CFBundleDevelopmentRegion": "zh_CN",
         "NSHumanReadableCopyright": "Copyright © 2026. All rights reserved.",

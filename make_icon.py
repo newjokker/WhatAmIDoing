@@ -85,18 +85,28 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 iconset = os.path.join(SCRIPT_DIR, 'clock.iconset')
 os.makedirs(iconset, exist_ok=True)
 
-sizes = [16, 32, 64, 128, 256, 512]
-for s in sizes:
-    data = _create_png_raw(s, s)
+master_png = os.path.join(iconset, 'master.png')
+with open(master_png, 'wb') as f:
+    f.write(_create_png_raw(1024, 1024))
+
+env = dict(os.environ)
+env['COPYFILE_DISABLE'] = '1'
+
+icon_sizes = [16, 32, 128, 256, 512]
+for s in icon_sizes:
     path = os.path.join(iconset, f'icon_{s}x{s}.png')
-    with open(path, 'wb') as f:
-        f.write(data)
-    if s <= 128:
-        path2 = os.path.join(iconset, f'icon_{s}x{s}@2x.png')
-        with open(path2, 'wb') as f:
-            f.write(_create_png_raw(s * 2, s * 2))
+    sp.run(['sips', '-z', str(s), str(s), master_png, '--out', path], check=True, env=env, stdout=sp.DEVNULL)
+
+    path2 = os.path.join(iconset, f'icon_{s}x{s}@2x.png')
+    sp.run(['sips', '-z', str(s * 2), str(s * 2), master_png, '--out', path2], check=True, env=env, stdout=sp.DEVNULL)
+
+os.remove(master_png)
 
 # Convert to .icns using iconutil
 icns_path = os.path.join(SCRIPT_DIR, 'icon.icns')
-sp.run(['iconutil', '-c', 'icns', iconset, '-o', icns_path], check=True)
+for name in os.listdir(iconset):
+    if name.startswith('._'):
+        os.remove(os.path.join(iconset, name))
+
+sp.run(['iconutil', '-c', 'icns', iconset, '-o', icns_path], check=True, env=env)
 print(f'✅ 图标已生成: {icns_path}')
