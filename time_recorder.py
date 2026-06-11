@@ -20,12 +20,19 @@ __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/l
 import rumps
 import json
 import os
+import sys
 import datetime
 import tempfile
 import subprocess
 import re
+import traceback
 import urllib.request
 import urllib.error
+
+try:
+    import threading
+except Exception:
+    threading = None
 
 # ═══════════════════════════════════════
 #  ObjC 面板回调处理类（模块级，只定义一次）
@@ -64,6 +71,78 @@ MAX_PRESETS = 20
 
 CONFIG_DIR = os.path.expanduser("~")
 CONFIG_FILE = os.path.join(CONFIG_DIR, ".time_recorder.json")
+ERROR_LOG_DIR = os.path.expanduser("~/Library/Logs/TimeRecorder")
+ERROR_LOG_FILE = os.path.join(ERROR_LOG_DIR, "error.log")
+
+
+def ensure_error_log_dir(log_dir=None):
+    """确保错误日志目录存在，并返回目录路径。"""
+    if log_dir is None:
+        log_dir = ERROR_LOG_DIR
+    os.makedirs(log_dir, exist_ok=True)
+    return log_dir
+
+
+def get_error_log_path():
+    """返回错误日志文件路径，调用时会先创建日志目录。"""
+    ensure_error_log_dir()
+    return ERROR_LOG_FILE
+
+
+def write_error_log(context, exc_info=None, message=None):
+    """把异常详情追加写入固定日志文件，便于后续排查。"""
+    try:
+        log_path = get_error_log_path()
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        lines = [
+            "=" * 80,
+            f"[{now}] {context}",
+            f"Version: {__version__}",
+        ]
+        if message:
+            lines.append(str(message))
+        if exc_info:
+            lines.append("Traceback:")
+            lines.extend(traceback.format_exception(*exc_info))
+        lines.append("")
+
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        return log_path
+    except Exception as log_error:
+        sys.stderr.write(f"[TimeRecorder] 写入错误日志失败: {log_error}\n")
+        return None
+
+
+def log_exception(context, exc):
+    """记录已捕获异常。"""
+    return write_error_log(context, (type(exc), exc, exc.__traceback__))
+
+
+def install_exception_logging():
+    """安装全局异常记录，捕获未处理的主线程和后台线程异常。"""
+    original_excepthook = sys.excepthook
+
+    def _excepthook(exc_type, exc, tb):
+        if exc_type is KeyboardInterrupt:
+            original_excepthook(exc_type, exc, tb)
+            return
+        write_error_log("未处理异常", (exc_type, exc, tb))
+        original_excepthook(exc_type, exc, tb)
+
+    sys.excepthook = _excepthook
+
+    if threading is not None and hasattr(threading, "excepthook"):
+        original_threading_excepthook = threading.excepthook
+
+        def _threading_excepthook(args):
+            write_error_log(
+                f"线程未处理异常: {getattr(args.thread, 'name', 'unknown')}",
+                (args.exc_type, args.exc_value, args.exc_traceback),
+            )
+            original_threading_excepthook(args)
+
+        threading.excepthook = _threading_excepthook
 
 
 def normalize_activity_name(text):
@@ -120,7 +199,8 @@ def safe_alert(**kwargs):
     """显示提示框；在非打包/无通知权限环境下避免异常影响主流程。"""
     try:
         return rumps.alert(**kwargs)
-    except Exception:
+    except Exception as e:
+        log_exception("显示提示框失败", e)
         return None
 
 
@@ -128,7 +208,8 @@ def safe_notification(**kwargs):
     """发送系统通知；失败时静默跳过，记录数据不能因此丢失。"""
     try:
         rumps.notification(**kwargs)
-    except Exception:
+    except Exception as e:
+        log_exception("发送系统通知失败", e)
         pass
 
 
@@ -150,7 +231,8 @@ def get_idle_time():
                     else:
                         idle_ns = int(raw)
                     return idle_ns / 1_000_000_000  # 纳秒 → 秒
-    except Exception:
+    except Exception as e:
+        log_exception("获取系统空闲时间失败", e)
         pass
     return 0
 
@@ -193,7 +275,8 @@ class TimeRecorder(rumps.App):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as e:
+            log_exception("加载配置失败", e)
             return {}
 
     def _save_config(self):
@@ -217,7 +300,8 @@ class TimeRecorder(rumps.App):
             finally:
                 tmp.close()
             os.replace(tmp.name, CONFIG_FILE)
-        except OSError:
+        except OSError as e:
+            log_exception("保存配置失败", e)
             pass
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -257,6 +341,9 @@ class TimeRecorder(rumps.App):
         self._rebuild_presets_menu()
         self.settings_menu.add(self.presets_submenu)
 
+        # 错误日志
+        self.logs_item = rumps.MenuItem("🧾 打开错误日志文件夹", callback=self.open_error_logs)
+
         # ── 检查更新 ──
         self.update_item = rumps.MenuItem("🔄 检查更新", callback=self.check_update)
 
@@ -279,6 +366,7 @@ class TimeRecorder(rumps.App):
             None,
             self.settings_menu,
             self.test_menu,
+            self.logs_item,
             self.update_item,
             None,
             rumps.MenuItem("❓ 关于", callback=self.show_about),
@@ -655,11 +743,13 @@ class TimeRecorder(rumps.App):
                             name = normalize_activity_name(cb.title())
                             if name:
                                 result_list.append(name)
-                    except Exception:
+                    except Exception as e:
+                        log_exception("读取记录面板勾选项失败", e)
                         pass
                 try:
                     result_list.extend(parse_activity_input(input_field.stringValue(), self.presets))
-                except Exception:
+                except Exception as e:
+                    log_exception("读取记录面板输入内容失败", e)
                     pass
 
             panel.orderOut_(None)
@@ -674,10 +764,11 @@ class TimeRecorder(rumps.App):
             if panel is not None:
                 try:
                     panel.orderOut_(None)
-                except Exception:
+                except Exception as close_error:
+                    log_exception("关闭记录面板失败", close_error)
                     pass
-            import sys as _sys
-            _sys.stderr.write(f"[TimeRecorder] NSPanel 回退: {e}\n")
+            log_exception("原生记录面板失败，已回退到文本输入", e)
+            sys.stderr.write(f"[TimeRecorder] NSPanel 回退: {e}\n")
             return False
 
     def _show_fallback_dialog(self):
@@ -743,6 +834,18 @@ class TimeRecorder(rumps.App):
                 subtitle="全部活动记录已删除",
                 message="",
                 sound=False,
+            )
+
+    def open_error_logs(self, _):
+        """在 Finder 中打开错误日志文件夹。"""
+        try:
+            log_dir = ensure_error_log_dir()
+            subprocess.run(["open", log_dir], check=False)
+        except Exception as e:
+            log_exception("打开错误日志文件夹失败", e)
+            safe_alert(
+                title="错误日志",
+                message=f"无法自动打开日志文件夹，请手动打开：\n{ERROR_LOG_DIR}",
             )
 
     def _record_activity(self, activity):
@@ -952,10 +1055,11 @@ class TimeRecorder(rumps.App):
             if panel is not None:
                 try:
                     panel.orderOut_(None)
-                except Exception:
+                except Exception as close_error:
+                    log_exception("关闭统计窗口失败", close_error)
                     pass
-            import sys as _sys
-            _sys.stderr.write(f"[TimeRecorder] Summary panel fallback: {e}\n")
+            log_exception("原生统计窗口失败，已回退到文本汇总", e)
+            sys.stderr.write(f"[TimeRecorder] Summary panel fallback: {e}\n")
             return False
 
     def show_today_summary(self, _):
@@ -1026,6 +1130,7 @@ class TimeRecorder(rumps.App):
         except json.JSONDecodeError:
             safe_alert(title="🔄 检查更新", message="解析版本响应失败，请稍后重试")
         except Exception as e:
+            log_exception("检查更新失败", e)
             safe_alert(title="🔄 检查更新", message=f"检查失败: {e}")
         finally:
             self.update_item.title = "🔄 检查更新"
@@ -1053,4 +1158,5 @@ class TimeRecorder(rumps.App):
 
 
 if __name__ == "__main__":
+    install_exception_logging()
     TimeRecorder().run()

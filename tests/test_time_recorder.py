@@ -1,7 +1,9 @@
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 class _FakeApp:
@@ -76,6 +78,47 @@ class VersionTests(unittest.TestCase):
         )
 
         self.assertEqual(version_line, f'version = "{time_recorder.__version__}"')
+
+
+class ErrorLogTests(unittest.TestCase):
+    def test_write_error_log_creates_file_with_traceback(self):
+        old_dir = time_recorder.ERROR_LOG_DIR
+        old_file = time_recorder.ERROR_LOG_FILE
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                time_recorder.ERROR_LOG_DIR = tmp
+                time_recorder.ERROR_LOG_FILE = str(Path(tmp) / "error.log")
+
+                try:
+                    raise RuntimeError("boom")
+                except RuntimeError as exc:
+                    log_path = time_recorder.log_exception("测试异常", exc)
+
+                content = Path(log_path).read_text(encoding="utf-8")
+
+            self.assertIn("测试异常", content)
+            self.assertIn("RuntimeError: boom", content)
+            self.assertIn("Traceback:", content)
+        finally:
+            time_recorder.ERROR_LOG_DIR = old_dir
+            time_recorder.ERROR_LOG_FILE = old_file
+
+    def test_open_error_logs_opens_log_directory(self):
+        old_dir = time_recorder.ERROR_LOG_DIR
+        old_file = time_recorder.ERROR_LOG_FILE
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                time_recorder.ERROR_LOG_DIR = tmp
+                time_recorder.ERROR_LOG_FILE = str(Path(tmp) / "error.log")
+                app = object.__new__(time_recorder.TimeRecorder)
+
+                with mock.patch.object(time_recorder.subprocess, "run") as run:
+                    app.open_error_logs(None)
+
+                run.assert_called_once_with(["open", tmp], check=False)
+        finally:
+            time_recorder.ERROR_LOG_DIR = old_dir
+            time_recorder.ERROR_LOG_FILE = old_file
 
 
 if __name__ == "__main__":
