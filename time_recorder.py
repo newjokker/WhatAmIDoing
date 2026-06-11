@@ -12,7 +12,7 @@
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.4.10"
+__version__ = "1.4.11"
 __app_name__ = "⏰ 干啥来着"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
@@ -69,6 +69,7 @@ except Exception:
 # ═══════════════════════════════════════
 DEFAULT_INTERVAL = 5           # 弹窗间隔（分钟，默认 5min 方便测试）
 DEFAULT_IDLE_THRESHOLD = 5     # 空闲阈值（分钟），超过此值视为电脑无人使用
+DEFAULT_DAILY_SUMMARY_TIME = "17:30"
 DEFAULT_PRESETS = ["写代码", "开会", "阅读", "学习", "思考", "摸鱼"]
 MAX_ACTIVITY_LENGTH = 20
 MAX_PRESETS = 12
@@ -219,6 +220,35 @@ def calculate_next_reminder_time(last_check_time, interval_minutes):
     if last_check is None:
         return None
     return last_check + datetime.timedelta(minutes=interval_minutes)
+
+
+def normalize_daily_summary_time(value):
+    """清洗每日汇总时间，返回 HH:MM 或 None（关闭）。"""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"off", "none", "false", "关闭"}:
+        return None
+    match = re.fullmatch(r"(\d{1,2}):(\d{1,2})", text)
+    if not match:
+        return None
+    hour, minute = int(match.group(1)), int(match.group(2))
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return f"{hour:02d}:{minute:02d}"
+
+
+def is_daily_summary_due(now, daily_summary_time, last_daily_summary_date):
+    """判断当前是否应该弹出每日汇总。"""
+    summary_time = normalize_daily_summary_time(daily_summary_time)
+    if summary_time is None:
+        return False
+    today = now.date().isoformat()
+    if last_daily_summary_date == today:
+        return False
+    hour, minute = [int(part) for part in summary_time.split(":")]
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return now >= target
 
 
 def build_activity_summary(activities):
@@ -397,6 +427,12 @@ class TimeRecorder(rumps.App):
             self.presets = list(DEFAULT_PRESETS)
         self.last_check_time = config.get("last_check_time", None)
         self.last_reminder_time = config.get("last_reminder_time", None)
+        if "daily_summary_time" in config and config.get("daily_summary_time") is None:
+            self.daily_summary_time = None
+        else:
+            raw_daily_time = config.get("daily_summary_time", DEFAULT_DAILY_SUMMARY_TIME)
+            self.daily_summary_time = normalize_daily_summary_time(raw_daily_time) or DEFAULT_DAILY_SUMMARY_TIME
+        self.last_daily_summary_date = config.get("last_daily_summary_date", None)
         self.activities = config.get("activities", [])
         self.recording_lock = False  # 防止重复弹窗
 
@@ -435,6 +471,8 @@ class TimeRecorder(rumps.App):
             "presets": self.presets,
             "last_check_time": self.last_check_time,
             "last_reminder_time": self.last_reminder_time,
+            "daily_summary_time": self.daily_summary_time,
+            "last_daily_summary_date": self.last_daily_summary_date,
             "activities": self.activities,
         }
         try:
@@ -501,6 +539,11 @@ class TimeRecorder(rumps.App):
         self._setup_duration_menu(self.idle_submenu, self.idle_threshold_minutes,
                                   [0, 1, 3, 5, 10, 15, 30], self._on_set_idle_threshold)
         self.settings_menu.add(self.idle_submenu)
+
+        # 每日汇总提醒
+        self.daily_summary_submenu = rumps.MenuItem("📅 每日汇总提醒")
+        self._rebuild_daily_summary_menu()
+        self.settings_menu.add(self.daily_summary_submenu)
 
         # 预设选项管理
         self.presets_submenu = rumps.MenuItem("📋 预设选项")
@@ -574,6 +617,61 @@ class TimeRecorder(rumps.App):
         sender.state = True
         self.idle_threshold_minutes = sender._setting_value
         self._save_config()
+
+    # ── 每日汇总提醒 ──
+
+    def _rebuild_daily_summary_menu(self):
+        """重建每日汇总提醒设置菜单。"""
+        for key in list(self.daily_summary_submenu.keys()):
+            del self.daily_summary_submenu[key]
+
+        current = self.daily_summary_time or "已关闭"
+        status = rumps.MenuItem(f"当前: {current}", callback=None)
+        self.daily_summary_submenu.add(status)
+        self.daily_summary_submenu.add(rumps.MenuItem(None))
+
+        for value in ["17:30", "18:00", "19:00", "21:00"]:
+            item = rumps.MenuItem(value, callback=self._menu_callback(f"每日汇总 {value}", self._on_set_daily_summary_time))
+            item.state = (self.daily_summary_time == value)
+            item._setting_value = value
+            self.daily_summary_submenu.add(item)
+
+        custom = rumps.MenuItem("自定义时间…", callback=self._menu_callback("自定义每日汇总时间", self._on_custom_daily_summary_time))
+        self.daily_summary_submenu.add(custom)
+
+        close_item = rumps.MenuItem("关闭每日汇总", callback=self._menu_callback("关闭每日汇总", self._on_disable_daily_summary))
+        close_item.state = (self.daily_summary_time is None)
+        self.daily_summary_submenu.add(close_item)
+
+    def _on_set_daily_summary_time(self, sender):
+        """设置每日汇总提醒时间。"""
+        self.daily_summary_time = normalize_daily_summary_time(sender._setting_value)
+        self._save_config()
+        self._rebuild_daily_summary_menu()
+
+    def _on_custom_daily_summary_time(self, _):
+        """输入自定义每日汇总时间。"""
+        win = rumps.Window(
+            title="每日汇总提醒",
+            message="请输入提醒时间（24 小时制 HH:MM）：",
+            default_text=self.daily_summary_time or DEFAULT_DAILY_SUMMARY_TIME,
+            cancel=True,
+        )
+        response = win.run()
+        if response.clicked:
+            summary_time = normalize_daily_summary_time(response.text)
+            if summary_time is None:
+                safe_alert(title="每日汇总提醒", message="时间格式不正确，请输入例如 17:30")
+                return
+            self.daily_summary_time = summary_time
+            self._save_config()
+            self._rebuild_daily_summary_menu()
+
+    def _on_disable_daily_summary(self, _):
+        """关闭每日汇总提醒。"""
+        self.daily_summary_time = None
+        self._save_config()
+        self._rebuild_daily_summary_menu()
 
     # ── 预设选项管理 ──
 
@@ -678,6 +776,7 @@ class TimeRecorder(rumps.App):
             return
 
         now = datetime.datetime.now()
+        self._maybe_show_daily_summary(now)
 
         # 首次启动：记录时间但不弹窗
         if self.last_check_time is None:
@@ -708,6 +807,14 @@ class TimeRecorder(rumps.App):
             if idle_minutes < self.idle_threshold_minutes:
                 # 电脑正在使用 → 弹窗
                 self._show_recording_dialog()
+
+    def _maybe_show_daily_summary(self, now):
+        """到达每日指定时间后自动展示今日汇总，每天只展示一次。"""
+        if not is_daily_summary_due(now, self.daily_summary_time, self.last_daily_summary_date):
+            return
+        self.last_daily_summary_date = now.date().isoformat()
+        self._save_config()
+        self.show_today_summary(None)
 
     def _show_recording_dialog(self):
         """弹出记录窗口——复选框勾选 + 自定义输入，点记录统一提交"""

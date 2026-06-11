@@ -1,3 +1,4 @@
+import datetime
 import json
 import sys
 import tempfile
@@ -110,6 +111,8 @@ class ReminderTimeTests(unittest.TestCase):
                 app.presets = ["写代码"]
                 app.last_check_time = "2026-06-11T09:00:00"
                 app.last_reminder_time = "2026-06-11T08:55:00"
+                app.daily_summary_time = "17:30"
+                app.last_daily_summary_date = None
                 app.activities = []
 
                 app._save_config()
@@ -119,6 +122,61 @@ class ReminderTimeTests(unittest.TestCase):
         finally:
             time_recorder.CONFIG_DIR = old_dir
             time_recorder.CONFIG_FILE = old_file
+
+
+class DailySummaryTests(unittest.TestCase):
+    def test_normalize_daily_summary_time(self):
+        self.assertEqual(time_recorder.normalize_daily_summary_time("7:5"), "07:05")
+        self.assertEqual(time_recorder.normalize_daily_summary_time("17:30"), "17:30")
+        self.assertIsNone(time_recorder.normalize_daily_summary_time("24:00"))
+        self.assertIsNone(time_recorder.normalize_daily_summary_time("关闭"))
+
+    def test_is_daily_summary_due(self):
+        now = datetime.datetime(2026, 6, 11, 17, 30)
+
+        self.assertTrue(time_recorder.is_daily_summary_due(now, "17:30", "2026-06-10"))
+        self.assertFalse(time_recorder.is_daily_summary_due(now, "17:31", "2026-06-10"))
+        self.assertFalse(time_recorder.is_daily_summary_due(now, "17:30", "2026-06-11"))
+        self.assertFalse(time_recorder.is_daily_summary_due(now, None, "2026-06-10"))
+
+    def test_save_config_persists_daily_summary_settings(self):
+        old_dir = time_recorder.CONFIG_DIR
+        old_file = time_recorder.CONFIG_FILE
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                time_recorder.CONFIG_DIR = tmp
+                time_recorder.CONFIG_FILE = str(Path(tmp) / ".time_recorder.json")
+                app = object.__new__(time_recorder.TimeRecorder)
+                app.interval_minutes = 5
+                app.idle_threshold_minutes = 0
+                app.presets = ["写代码"]
+                app.last_check_time = "2026-06-11T09:00:00"
+                app.last_reminder_time = None
+                app.daily_summary_time = "17:30"
+                app.last_daily_summary_date = "2026-06-10"
+                app.activities = []
+
+                app._save_config()
+                data = json.loads(Path(time_recorder.CONFIG_FILE).read_text(encoding="utf-8"))
+
+            self.assertEqual(data["daily_summary_time"], "17:30")
+            self.assertEqual(data["last_daily_summary_date"], "2026-06-10")
+        finally:
+            time_recorder.CONFIG_DIR = old_dir
+            time_recorder.CONFIG_FILE = old_file
+
+    def test_load_config_keeps_daily_summary_disabled(self):
+        app = object.__new__(time_recorder.TimeRecorder)
+        config = {"daily_summary_time": None}
+
+        daily_time = None if config.get("daily_summary_time") is None else (
+            time_recorder.normalize_daily_summary_time(config.get("daily_summary_time"))
+            or time_recorder.DEFAULT_DAILY_SUMMARY_TIME
+        )
+
+        app.daily_summary_time = daily_time
+
+        self.assertIsNone(app.daily_summary_time)
 
 
 class VersionTests(unittest.TestCase):
