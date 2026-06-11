@@ -1,3 +1,4 @@
+import json
 import sys
 import tempfile
 import types
@@ -106,12 +107,12 @@ class UpdateDownloadTests(unittest.TestCase):
     def test_select_release_asset_prefers_dmg(self):
         assets = [
             {"name": "source.zip", "browser_download_url": "https://example.com/source.zip"},
-            {"name": "WhatAmIDoing-v1.4.6.dmg", "browser_download_url": "https://example.com/app.dmg"},
+            {"name": "WhatAmIDoing-v1.4.7.dmg", "browser_download_url": "https://example.com/app.dmg"},
         ]
 
         selected = time_recorder.select_release_asset(assets)
 
-        self.assertEqual(selected["name"], "WhatAmIDoing-v1.4.6.dmg")
+        self.assertEqual(selected["name"], "WhatAmIDoing-v1.4.7.dmg")
 
     def test_select_release_asset_ignores_assets_without_download_url(self):
         assets = [
@@ -131,6 +132,35 @@ class UpdateDownloadTests(unittest.TestCase):
             path = time_recorder.unique_download_path(tmp, "../update.dmg")
 
         self.assertTrue(path.endswith("update (1).dmg"))
+
+
+class ExportJsonTests(unittest.TestCase):
+    def test_build_export_payload_includes_metadata_and_activities(self):
+        activities = [
+            {"date": "2026-06-11", "time": "09:00", "activity": "写代码"},
+        ]
+
+        payload = time_recorder.build_export_payload(activities, exported_at="2026-06-11T09:30:00")
+
+        self.assertEqual(payload["app"], time_recorder.__app_name__)
+        self.assertEqual(payload["version"], time_recorder.__version__)
+        self.assertEqual(payload["exported_at"], "2026-06-11T09:30:00")
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["activities"], activities)
+
+    def test_export_activities_json_writes_file(self):
+        activities = [
+            {"date": "2026-06-11", "time": "09:00", "activity": "写代码"},
+            {"date": "2026-06-11", "time": "10:00", "activity": "开会"},
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = time_recorder.export_activities_json(activities, directory=tmp)
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+
+        self.assertTrue(path.endswith(".json"))
+        self.assertEqual(data["total"], 2)
+        self.assertEqual(data["activities"], activities)
 
 
 class ErrorLogTests(unittest.TestCase):

@@ -12,7 +12,7 @@
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.4.6"
+__version__ = "1.4.7"
 __app_name__ = "⏰ 时间记录器"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
@@ -246,6 +246,42 @@ def unique_download_path(directory, filename):
     return path
 
 
+def build_export_payload(activities, exported_at=None):
+    """构建导出 JSON 内容。"""
+    if exported_at is None:
+        exported_at = datetime.datetime.now().isoformat()
+    return {
+        "app": __app_name__,
+        "version": __version__,
+        "exported_at": exported_at,
+        "total": len(activities or []),
+        "activities": list(activities or []),
+    }
+
+
+def export_activities_json(activities, directory=DOWNLOAD_DIR):
+    """导出活动记录为 JSON 文件，并返回保存路径。"""
+    os.makedirs(directory, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    filename = f"TimeRecorder-activities-{timestamp}.json"
+    dest_path = unique_download_path(directory, filename)
+    tmp_path = f"{dest_path}.tmp"
+    payload = build_export_payload(activities)
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp_path, dest_path)
+        return dest_path
+    except Exception:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def download_release_asset(url, dest_path):
     """把 Release asset 下载到本地，成功后返回保存路径。"""
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
@@ -416,6 +452,7 @@ class TimeRecorder(rumps.App):
         self.today_item = rumps.MenuItem("📅 今日汇总", callback=self._menu_callback("今日汇总", self.show_today_summary))
         self.week_item = rumps.MenuItem("📆 本周汇总", callback=self._menu_callback("本周汇总", self.show_week_summary))
         self.all_item = rumps.MenuItem("📊 全部记录", callback=self._menu_callback("全部记录", self.show_all_summary))
+        self.export_json_item = rumps.MenuItem("📤 导出 JSON", callback=self._menu_callback("导出 JSON", self.export_json))
 
         # ── 设置子菜单 ──
         self.settings_menu = rumps.MenuItem("⚙ 设置")
@@ -459,6 +496,7 @@ class TimeRecorder(rumps.App):
             self.today_item,
             self.week_item,
             self.all_item,
+            self.export_json_item,
             None,
             self.settings_menu,
             self.test_menu,
@@ -962,6 +1000,22 @@ class TimeRecorder(rumps.App):
                 title="错误日志",
                 message=f"无法自动打开日志文件夹，请手动打开：\n{ERROR_LOG_DIR}",
             )
+
+    def export_json(self, _):
+        """导出全部活动记录为 JSON 文件。"""
+        if not self.activities:
+            safe_alert(title="📤 导出 JSON", message="暂无记录可导出")
+            return
+
+        dest_path = export_activities_json(self.activities)
+        open_folder = safe_alert(
+            title="✅ 导出完成",
+            message=f"已导出 {len(self.activities)} 条记录到：\n{dest_path}\n\n是否打开所在文件夹？",
+            ok="打开",
+            cancel="稍后",
+        )
+        if open_folder:
+            subprocess.run(["open", os.path.dirname(dest_path)], check=False)
 
     def _record_activity(self, activity):
         """记录一条活动"""
