@@ -12,7 +12,7 @@
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.4.4"
+__version__ = "1.4.5"
 __app_name__ = "⏰ 时间记录器"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
@@ -678,12 +678,11 @@ class TimeRecorder(rumps.App):
             panel_w = 560
             margin = 24
             section_w = panel_w - margin * 2
-            header_h = 58
             preset_box_h = 42 + preset_h
             input_box_h = 58
             footer_h = 54
             gap = 10
-            panel_h = int(margin + header_h + gap + preset_box_h + gap + input_box_h + footer_h)
+            panel_h = int(margin + preset_box_h + gap + input_box_h + footer_h)
             bg_color = self._ui_color(AppKit, 0.965, 0.965, 0.95, 1.0)
             card_color = self._ui_color(AppKit, 1.0, 1.0, 0.985, 1.0)
             border_color = self._ui_color(AppKit, 0.84, 0.84, 0.80, 1.0)
@@ -704,20 +703,7 @@ class TimeRecorder(rumps.App):
             content = panel.contentView()
             self._style_panel(AppKit, panel, content, bg_color)
 
-            title_lbl = self._make_label(
-                AppKit,
-                Foundation,
-                "现在在做什么？",
-                margin,
-                panel_h - 44,
-                section_w,
-                30,
-                color=accent_color,
-                font=AppKit.NSFont.boldSystemFontOfSize_(22),
-            )
-            content.addSubview_(title_lbl)
-
-            preset_box_y = panel_h - margin - header_h - gap - preset_box_h
+            preset_box_y = panel_h - margin - preset_box_h
             preset_box = self._make_card(
                 AppKit, Foundation, margin, preset_box_y, section_w, preset_box_h,
                 card_color, border_color,
@@ -1002,7 +988,7 @@ class TimeRecorder(rumps.App):
 
         panel = None
         try:
-            panel_w, panel_h = 800, 640
+            panel_w, panel_h = 800, 570
             bg_color = self._ui_color(AppKit, 0.965, 0.965, 0.95, 1.0)
             card_color = self._ui_color(AppKit, 1.0, 1.0, 0.985, 1.0)
             subtle_card_color = self._ui_color(AppKit, 0.982, 0.982, 0.965, 1.0)
@@ -1024,18 +1010,7 @@ class TimeRecorder(rumps.App):
             controls = []
             self._style_panel(AppKit, panel, content, bg_color)
 
-            content.addSubview_(self._make_label(
-                AppKit, Foundation, title, 32, panel_h - 52, panel_w - 64, 30,
-                color=accent_color,
-                font=AppKit.NSFont.boldSystemFontOfSize_(23),
-            ))
-            content.addSubview_(self._make_label(
-                AppKit, Foundation, "活动分布、频次概览和最近记录", 32, panel_h - 78, panel_w - 64, 18,
-                color=AppKit.NSColor.secondaryLabelColor(),
-                font=AppKit.NSFont.systemFontOfSize_(12.5),
-            ))
-
-            metric_y = panel_h - 154
+            metric_y = panel_h - 102
             metrics = [
                 ("总记录", str(summary["total"])),
                 ("活跃天数", str(summary["active_days"])),
