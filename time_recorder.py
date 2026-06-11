@@ -835,11 +835,16 @@ class TimeRecorder(rumps.App):
         for i, p in enumerate(self.presets):
             preset_lines.append(f"  [{i+1}] {p}")
         presets_hint = "\n".join(preset_lines)
+        try:
+            last_check = datetime.datetime.fromisoformat(self.last_check_time)
+        except (ValueError, TypeError):
+            last_check = datetime.datetime.now()
+        next_check_time = last_check + datetime.timedelta(minutes=self.interval_minutes)
 
         win = rumps.Window(
             title="⏰ 时间记录",
             message=(
-                f"距离上次记录已过去 {self.interval_minutes} 分钟\n"
+                f"下次记录时间：{next_check_time.strftime('%H:%M')}\n"
                 f"现在在做什么？多个活动用逗号、顿号或换行分隔\n\n"
                 f"📋 预设选项（输入数字快速选择）：\n"
                 f"{presets_hint}\n\n"
