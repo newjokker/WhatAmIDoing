@@ -48,12 +48,10 @@ cp "$SCRIPT_DIR/time_recorder.py" "$BUILD_DIR/"
 cp "$SCRIPT_DIR/setup.py" "$BUILD_DIR/"
 cp "$SCRIPT_DIR/pyproject.toml" "$BUILD_DIR/"
 cp "$SCRIPT_DIR/icon.icns" "$BUILD_DIR/"
-cp "$SCRIPT_DIR/make_icon.py" "$BUILD_DIR/"
 
 # ── 生成图标 ──
 echo "🎨 生成图标..."
 cd "$BUILD_DIR"
-$PYTHON make_icon.py
 
 # ── 构建 .app ──
 echo "🔨 构建 .app（py2app）..."

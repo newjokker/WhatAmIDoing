@@ -20,17 +20,31 @@ import tempfile
 from pathlib import Path
 
 
-ICON_ENTRIES = [
-    (16, "icon_16x16.png", b"icp4"),
-    (32, "icon_16x16@2x.png", b"icp5"),
-    (32, "icon_32x32.png", b"icp5"),
-    (64, "icon_32x32@2x.png", b"icp6"),
-    (128, "icon_128x128.png", b"ic07"),
-    (256, "icon_128x128@2x.png", b"ic08"),
-    (256, "icon_256x256.png", b"ic08"),
-    (512, "icon_256x256@2x.png", b"ic09"),
-    (512, "icon_512x512.png", b"ic09"),
-    (1024, "icon_512x512@2x.png", b"ic10"),
+# macOS iconset standard file set. The @2x entries intentionally duplicate
+# some pixel sizes because Finder uses the filename scale metadata.
+ICONSET_ENTRIES = [
+    (16, "icon_16x16.png"),
+    (32, "icon_16x16@2x.png"),
+    (32, "icon_32x32.png"),
+    (64, "icon_32x32@2x.png"),
+    (128, "icon_128x128.png"),
+    (256, "icon_128x128@2x.png"),
+    (256, "icon_256x256.png"),
+    (512, "icon_256x256@2x.png"),
+    (512, "icon_512x512.png"),
+    (1024, "icon_512x512@2x.png"),
+]
+
+# ICNS chunks are keyed by pixel size, not filename scale, so the direct writer
+# stores one representative for each unique modern PNG-backed icon size.
+ICNS_CHUNK_ENTRIES = [
+    ("icon_16x16.png", b"icp4"),
+    ("icon_32x32.png", b"icp5"),
+    ("icon_32x32@2x.png", b"icp6"),
+    ("icon_128x128.png", b"ic07"),
+    ("icon_256x256.png", b"ic08"),
+    ("icon_512x512.png", b"ic09"),
+    ("icon_512x512@2x.png", b"ic10"),
 ]
 
 
@@ -53,7 +67,7 @@ def make_iconset(input_png, iconset_dir):
     env = dict(os.environ)
     env["COPYFILE_DISABLE"] = "1"
 
-    for size, filename, _code in ICON_ENTRIES:
+    for size, filename in ICONSET_ENTRIES:
         output = iconset_dir / filename
         sp.run(
             ["sips", "-z", str(size), str(size), str(input_png), "--out", str(output)],
@@ -62,22 +76,19 @@ def make_iconset(input_png, iconset_dir):
             stdout=sp.DEVNULL,
             stderr=sp.PIPE,
         )
+    validate_iconset(iconset_dir)
+
+
+def validate_iconset(iconset_dir):
+    missing = [filename for _size, filename in ICONSET_ENTRIES if not (iconset_dir / filename).exists()]
+    if missing:
+        raise RuntimeError(f"iconset 缺少文件: {', '.join(missing)}")
 
 
 def write_icns_from_iconset(iconset_dir, output_icns):
     """Write a PNG-backed ICNS file directly from the iconset entries."""
-    # Avoid duplicate type chunks where 1x and @2x share the same pixel size.
-    entries = [
-        ("icon_16x16.png", b"icp4"),
-        ("icon_32x32.png", b"icp5"),
-        ("icon_32x32@2x.png", b"icp6"),
-        ("icon_128x128.png", b"ic07"),
-        ("icon_256x256.png", b"ic08"),
-        ("icon_512x512.png", b"ic09"),
-        ("icon_512x512@2x.png", b"ic10"),
-    ]
     chunks = []
-    for filename, code in entries:
+    for filename, code in ICNS_CHUNK_ENTRIES:
         data = (iconset_dir / filename).read_bytes()
         chunks.append(code + struct.pack(">I", len(data) + 8) + data)
 
