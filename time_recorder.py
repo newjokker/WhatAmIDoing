@@ -12,8 +12,9 @@
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.4.11"
+__version__ = "1.4.12"
 __app_name__ = "⏰ 干啥来着"
+__bundle_id__ = "com.timerecorder.app"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
 
@@ -28,6 +29,7 @@ import re
 import traceback
 import urllib.request
 import urllib.error
+import plistlib
 
 try:
     import threading
@@ -79,6 +81,9 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, ".time_recorder.json")
 ERROR_LOG_DIR = os.path.expanduser("~/Library/Logs/TimeRecorder")
 ERROR_LOG_FILE = os.path.join(ERROR_LOG_DIR, "error.log")
 DOWNLOAD_DIR = os.path.expanduser("~/Downloads")
+LAUNCH_AGENT_LABEL = __bundle_id__
+LAUNCH_AGENT_DIR = os.path.expanduser("~/Library/LaunchAgents")
+LAUNCH_AGENT_FILE = os.path.join(LAUNCH_AGENT_DIR, f"{LAUNCH_AGENT_LABEL}.plist")
 
 
 def ensure_error_log_dir(log_dir=None):
@@ -93,6 +98,48 @@ def get_error_log_path():
     """返回错误日志文件路径，调用时会先创建日志目录。"""
     ensure_error_log_dir()
     return ERROR_LOG_FILE
+
+
+def get_running_app_path():
+    """返回当前打包 .app 路径；开发模式下返回 None。"""
+    marker = ".app/Contents/"
+    executable = os.path.abspath(sys.argv[0])
+    if marker not in executable:
+        return None
+    return executable.split(marker, 1)[0] + ".app"
+
+
+def build_launch_agent_plist(app_path):
+    """生成用户 LaunchAgent 配置。"""
+    return {
+        "Label": LAUNCH_AGENT_LABEL,
+        "ProgramArguments": ["/usr/bin/open", "-gj", app_path],
+        "RunAtLoad": True,
+        "KeepAlive": False,
+    }
+
+
+def install_launch_agent(app_path=None, plist_path=LAUNCH_AGENT_FILE):
+    """安装开机自启 LaunchAgent。"""
+    if app_path is None:
+        app_path = get_running_app_path()
+    if not app_path:
+        raise RuntimeError("当前不是打包后的 .app，无法设置开机自启")
+    os.makedirs(os.path.dirname(plist_path), exist_ok=True)
+    with open(plist_path, "wb") as f:
+        plistlib.dump(build_launch_agent_plist(app_path), f)
+    return plist_path
+
+
+def uninstall_launch_agent(plist_path=LAUNCH_AGENT_FILE):
+    """移除开机自启 LaunchAgent。"""
+    if os.path.exists(plist_path):
+        os.remove(plist_path)
+
+
+def is_launch_agent_enabled(plist_path=LAUNCH_AGENT_FILE):
+    """检查是否已启用开机自启。"""
+    return os.path.exists(plist_path)
 
 
 def write_error_log(context, exc_info=None, message=None):
@@ -545,6 +592,10 @@ class TimeRecorder(rumps.App):
         self._rebuild_daily_summary_menu()
         self.settings_menu.add(self.daily_summary_submenu)
 
+        self.launch_at_login_item = rumps.MenuItem("🚀 开机自启", callback=self._menu_callback("开机自启", self._toggle_launch_at_login))
+        self._update_launch_at_login_item()
+        self.settings_menu.add(self.launch_at_login_item)
+
         # 预设选项管理
         self.presets_submenu = rumps.MenuItem("📋 预设选项")
         self._rebuild_presets_menu()
@@ -672,6 +723,34 @@ class TimeRecorder(rumps.App):
         self.daily_summary_time = None
         self._save_config()
         self._rebuild_daily_summary_menu()
+
+    # ── 开机自启 ──
+
+    def _update_launch_at_login_item(self):
+        """刷新开机自启菜单状态。"""
+        if hasattr(self, "launch_at_login_item"):
+            self.launch_at_login_item.state = is_launch_agent_enabled()
+
+    def _toggle_launch_at_login(self, _):
+        """切换开机自启。"""
+        try:
+            if is_launch_agent_enabled():
+                uninstall_launch_agent()
+                safe_alert(title="开机自启", message="已关闭开机自启")
+            else:
+                install_launch_agent()
+                safe_alert(title="开机自启", message="已开启开机自启")
+        except Exception as e:
+            log_exception("切换开机自启失败", e)
+            safe_alert(
+                title="开机自启",
+                message=(
+                    f"设置失败：{e}\n\n"
+                    "请先把应用安装到 Applications 后，再从菜单中开启。"
+                ),
+            )
+        finally:
+            self._update_launch_at_login_item()
 
     # ── 预设选项管理 ──
 

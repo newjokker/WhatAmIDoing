@@ -7,7 +7,7 @@ from setuptools import setup
 
 APP = ["time_recorder.py"]
 DATA_FILES = []
-VERSION = "1.4.11"
+VERSION = "1.4.12"
 OPTIONS = {
     "argv_emulation": False,
     "iconfile": "icon.icns",

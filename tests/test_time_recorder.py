@@ -1,5 +1,6 @@
 import datetime
 import json
+import plistlib
 import sys
 import tempfile
 import types
@@ -177,6 +178,40 @@ class DailySummaryTests(unittest.TestCase):
         app.daily_summary_time = daily_time
 
         self.assertIsNone(app.daily_summary_time)
+
+
+class LaunchAgentTests(unittest.TestCase):
+    def test_build_launch_agent_plist(self):
+        plist = time_recorder.build_launch_agent_plist("/Applications/干啥来着.app")
+
+        self.assertEqual(plist["Label"], time_recorder.LAUNCH_AGENT_LABEL)
+        self.assertEqual(plist["ProgramArguments"], ["/usr/bin/open", "-gj", "/Applications/干啥来着.app"])
+        self.assertTrue(plist["RunAtLoad"])
+        self.assertFalse(plist["KeepAlive"])
+
+    def test_install_and_uninstall_launch_agent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plist_path = str(Path(tmp) / "com.timerecorder.app.plist")
+
+            path = time_recorder.install_launch_agent(
+                app_path="/Applications/干啥来着.app",
+                plist_path=plist_path,
+            )
+            data = plistlib.loads(Path(path).read_bytes())
+
+            self.assertTrue(time_recorder.is_launch_agent_enabled(plist_path))
+            self.assertEqual(data["ProgramArguments"][-1], "/Applications/干啥来着.app")
+
+            time_recorder.uninstall_launch_agent(plist_path)
+
+            self.assertFalse(time_recorder.is_launch_agent_enabled(plist_path))
+
+    def test_install_launch_agent_requires_app_path(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(time_recorder, "get_running_app_path", return_value=None):
+            plist_path = str(Path(tmp) / "com.timerecorder.app.plist")
+
+            with self.assertRaises(RuntimeError):
+                time_recorder.install_launch_agent(plist_path=plist_path)
 
 
 class VersionTests(unittest.TestCase):
