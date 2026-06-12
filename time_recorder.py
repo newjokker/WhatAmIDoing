@@ -553,7 +553,7 @@ class TimeRecorder(rumps.App):
     """菜单栏干啥来着"""
 
     def __init__(self):
-        super().__init__("⏰ 待命", quit_button=None)
+        super().__init__("📝 待命", quit_button=None)
 
         # ── 从文件加载配置 ──
         config = self._load_config()
@@ -577,7 +577,7 @@ class TimeRecorder(rumps.App):
         self.recording_lock = False  # 防止重复弹窗
 
         # ── 更新菜单栏标题 ──
-        self.title = f"⏰ {self.interval_minutes}min"
+        self.title = f"📝 {self.interval_minutes}min"
 
         # ── 构建菜单 ──
         self._build_menu()
@@ -765,7 +765,7 @@ class TimeRecorder(rumps.App):
                 item.state = False
         sender.state = True
         self.interval_minutes = sender._setting_value
-        self.title = f"⏰ {self.interval_minutes}min"
+        self.title = f"📝 {self.interval_minutes}min"
         self._save_config()
         self._update_reminder_items()
 
