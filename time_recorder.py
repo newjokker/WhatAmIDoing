@@ -698,9 +698,9 @@ class TimeRecorder(rumps.App):
         self.check_now_item = rumps.MenuItem("🔍 立即记录", callback=self._menu_callback("立即记录", self.trigger_record))
 
         # ── 上次活动 ──
-        self.last_activity_item = rumps.MenuItem("⏳ 暂无记录", callback=None)
-        self.last_reminder_item = rumps.MenuItem("🔔 上次提醒: 暂无", callback=None)
-        self.next_reminder_item = rumps.MenuItem("⏭ 下次提醒: 暂无", callback=None)
+        self.last_activity_item = rumps.MenuItem("暂无记录", callback=None)
+        self.last_reminder_item = rumps.MenuItem("上次: 暂无", callback=None)
+        self.next_reminder_item = rumps.MenuItem("下次: 暂无", callback=None)
 
         # ── 汇总菜单 ──
         self.today_item = rumps.MenuItem("📅 今日汇总", callback=self._menu_callback("今日汇总", self.show_today_summary))
@@ -1439,16 +1439,16 @@ class TimeRecorder(rumps.App):
             self.last_activity_item.title = "⏳ 暂无记录"
             return
         last = self.activities[-1]
-        self.last_activity_item.title = f"🕐 最近: {last['activity']} ({last['time']})"
+        self.last_activity_item.title = f"最近: {last['activity']} ({last['time']})"
 
     def _update_reminder_items(self):
         """更新菜单栏中的上次/下次提醒时间。"""
         if hasattr(self, "last_reminder_item"):
-            self.last_reminder_item.title = f"🔔 上次提醒: {format_menu_datetime(self.last_reminder_time)}"
+            self.last_reminder_item.title = f"上次: {format_menu_datetime(self.last_reminder_time)}"
         if hasattr(self, "next_reminder_item"):
             next_time = calculate_next_reminder_time(self.last_check_time, self.interval_minutes)
             text = "暂无" if next_time is None else format_menu_datetime(next_time.isoformat())
-            self.next_reminder_item.title = f"⏭ 下次提醒: {text}"
+            self.next_reminder_item.title = f"下次: {text}"
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     #  汇总功能

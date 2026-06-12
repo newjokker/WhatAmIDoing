@@ -34,3 +34,7 @@ venv/
 .env/
 .eggs/
 venv2/
+
+
+/node_modules/
+
