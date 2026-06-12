@@ -12,7 +12,7 @@
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.4.14"
+__version__ = "1.4.15"
 __app_name__ = "⏰ 干啥来着"
 __bundle_id__ = "com.timerecorder.app"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
@@ -77,7 +77,9 @@ MAX_ACTIVITY_LENGTH = 20
 MAX_PRESETS = 12
 
 CONFIG_DIR = os.path.expanduser("~")
-CONFIG_FILE = os.path.join(CONFIG_DIR, ".time_recorder.json")
+LEGACY_CONFIG_FILE = os.path.join(CONFIG_DIR, ".time_recorder.json")
+CONFIG_FILE = os.path.join(CONFIG_DIR, ".time_recorder_config.json")
+ACTIVITIES_FILE = os.path.join(CONFIG_DIR, ".time_recorder_activities.jsonl")
 ERROR_LOG_DIR = os.path.expanduser("~/Library/Logs/TimeRecorder")
 ERROR_LOG_FILE = os.path.join(ERROR_LOG_DIR, "error.log")
 DOWNLOAD_DIR = os.path.expanduser("~/Downloads")
@@ -140,6 +142,97 @@ def uninstall_launch_agent(plist_path=LAUNCH_AGENT_FILE):
 def is_launch_agent_enabled(plist_path=LAUNCH_AGENT_FILE):
     """检查是否已启用开机自启。"""
     return os.path.exists(plist_path)
+
+
+def split_config_and_activities(data):
+    """把旧格式数据拆成配置和活动记录。"""
+    data = dict(data or {})
+    activities = data.pop("activities", [])
+    return data, activities if isinstance(activities, list) else []
+
+
+def atomic_write_json(path, data):
+    """原子写入 JSON 文件。"""
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", suffix=".json", dir=directory, delete=False,
+    )
+    try:
+        json.dump(data, tmp, indent=2, ensure_ascii=False)
+        tmp.write("\n")
+        tmp.flush()
+        os.fsync(tmp.fileno())
+    finally:
+        tmp.close()
+    os.replace(tmp.name, path)
+
+
+def write_activities_file(activities, path=ACTIVITIES_FILE):
+    """以 JSON Lines 格式重写活动历史文件。"""
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", suffix=".jsonl", dir=directory, delete=False,
+    )
+    try:
+        for activity in activities or []:
+            tmp.write(json.dumps(activity, ensure_ascii=False) + "\n")
+        tmp.flush()
+        os.fsync(tmp.fileno())
+    finally:
+        tmp.close()
+    os.replace(tmp.name, path)
+
+
+def append_activity_file(activity, path=ACTIVITIES_FILE):
+    """追加一条活动记录到 JSON Lines 文件。"""
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(activity, ensure_ascii=False) + "\n")
+
+
+def load_activities_file(path=ACTIVITIES_FILE):
+    """读取 JSON Lines 活动历史；兼容 JSON 数组文件。"""
+    if not os.path.exists(path):
+        return []
+    activities = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            first = f.read(1)
+            f.seek(0)
+            if first == "[":
+                data = json.load(f)
+                return data if isinstance(data, list) else []
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                item = json.loads(line)
+                if isinstance(item, dict):
+                    activities.append(item)
+        return activities
+    except (json.JSONDecodeError, OSError) as e:
+        log_exception("加载活动历史失败", e)
+        return []
+
+
+def migrate_legacy_storage(
+    legacy_path=LEGACY_CONFIG_FILE,
+    config_path=CONFIG_FILE,
+    activities_path=ACTIVITIES_FILE,
+):
+    """从旧的单文件存储迁移到配置/历史分离存储。"""
+    if os.path.exists(config_path) or not os.path.exists(legacy_path):
+        return None
+    with open(legacy_path, "r", encoding="utf-8") as f:
+        legacy_data = json.load(f)
+    config, activities = split_config_and_activities(legacy_data)
+    atomic_write_json(config_path, config)
+    if activities and not os.path.exists(activities_path):
+        write_activities_file(activities, activities_path)
+    return config
 
 
 def write_error_log(context, exc_info=None, message=None):
@@ -480,7 +573,7 @@ class TimeRecorder(rumps.App):
             raw_daily_time = config.get("daily_summary_time", DEFAULT_DAILY_SUMMARY_TIME)
             self.daily_summary_time = normalize_daily_summary_time(raw_daily_time) or DEFAULT_DAILY_SUMMARY_TIME
         self.last_daily_summary_date = config.get("last_daily_summary_date", None)
-        self.activities = config.get("activities", [])
+        self.activities = self._load_activities()
         self.recording_lock = False  # 防止重复弹窗
 
         # ── 更新菜单栏标题 ──
@@ -498,6 +591,13 @@ class TimeRecorder(rumps.App):
 
     def _load_config(self):
         """从 JSON 文件加载配置"""
+        try:
+            migrated = migrate_legacy_storage()
+            if migrated is not None:
+                return migrated
+        except (json.JSONDecodeError, OSError) as e:
+            log_exception("迁移旧配置失败", e)
+
         if not os.path.exists(CONFIG_FILE):
             return {}
         try:
@@ -506,6 +606,10 @@ class TimeRecorder(rumps.App):
         except (json.JSONDecodeError, OSError) as e:
             log_exception("加载配置失败", e)
             return {}
+
+    def _load_activities(self):
+        """从独立历史文件加载活动记录。"""
+        return load_activities_file()
 
     def _save_config(self):
         """原子写入配置"""
@@ -520,22 +624,27 @@ class TimeRecorder(rumps.App):
             "last_reminder_time": self.last_reminder_time,
             "daily_summary_time": self.daily_summary_time,
             "last_daily_summary_date": self.last_daily_summary_date,
-            "activities": self.activities,
         }
         try:
-            tmp = tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", suffix=".json",
-                dir=CONFIG_DIR, delete=False,
-            )
-            try:
-                json.dump(config, tmp, indent=2, ensure_ascii=False)
-                tmp.flush()
-                os.fsync(tmp.fileno())
-            finally:
-                tmp.close()
-            os.replace(tmp.name, CONFIG_FILE)
+            atomic_write_json(CONFIG_FILE, config)
         except OSError as e:
             log_exception("保存配置失败", e)
+            pass
+
+    def _save_activities(self):
+        """重写活动历史文件，用于清空/修复等批量操作。"""
+        try:
+            write_activities_file(self.activities)
+        except OSError as e:
+            log_exception("保存活动历史失败", e)
+            pass
+
+    def _append_activity(self, activity):
+        """追加活动历史，避免记录增长后反复重写大文件。"""
+        try:
+            append_activity_file(activity)
+        except OSError as e:
+            log_exception("追加活动历史失败", e)
             pass
 
     def _menu_callback(self, label, callback):
@@ -1222,7 +1331,7 @@ class TimeRecorder(rumps.App):
         )
         if result:
             self.activities = []
-            self._save_config()
+            self._save_activities()
             self._update_last_activity()
             safe_notification(
                 title="🗑 已清空",
@@ -1269,7 +1378,7 @@ class TimeRecorder(rumps.App):
             "time": now.strftime("%H:%M"),
         }
         self.activities.append(entry)
-        self._save_config()
+        self._append_activity(entry)
         self._update_last_activity()
 
         safe_notification(

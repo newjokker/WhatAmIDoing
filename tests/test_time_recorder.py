@@ -102,10 +102,12 @@ class ReminderTimeTests(unittest.TestCase):
     def test_save_config_persists_last_reminder_time(self):
         old_dir = time_recorder.CONFIG_DIR
         old_file = time_recorder.CONFIG_FILE
+        old_activities_file = time_recorder.ACTIVITIES_FILE
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 time_recorder.CONFIG_DIR = tmp
-                time_recorder.CONFIG_FILE = str(Path(tmp) / ".time_recorder.json")
+                time_recorder.CONFIG_FILE = str(Path(tmp) / ".time_recorder_config.json")
+                time_recorder.ACTIVITIES_FILE = str(Path(tmp) / ".time_recorder_activities.jsonl")
                 app = object.__new__(time_recorder.TimeRecorder)
                 app.interval_minutes = 5
                 app.idle_threshold_minutes = 0
@@ -120,9 +122,11 @@ class ReminderTimeTests(unittest.TestCase):
                 data = json.loads(Path(time_recorder.CONFIG_FILE).read_text(encoding="utf-8"))
 
             self.assertEqual(data["last_reminder_time"], "2026-06-11T08:55:00")
+            self.assertNotIn("activities", data)
         finally:
             time_recorder.CONFIG_DIR = old_dir
             time_recorder.CONFIG_FILE = old_file
+            time_recorder.ACTIVITIES_FILE = old_activities_file
 
 
 class DailySummaryTests(unittest.TestCase):
@@ -143,10 +147,12 @@ class DailySummaryTests(unittest.TestCase):
     def test_save_config_persists_daily_summary_settings(self):
         old_dir = time_recorder.CONFIG_DIR
         old_file = time_recorder.CONFIG_FILE
+        old_activities_file = time_recorder.ACTIVITIES_FILE
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 time_recorder.CONFIG_DIR = tmp
-                time_recorder.CONFIG_FILE = str(Path(tmp) / ".time_recorder.json")
+                time_recorder.CONFIG_FILE = str(Path(tmp) / ".time_recorder_config.json")
+                time_recorder.ACTIVITIES_FILE = str(Path(tmp) / ".time_recorder_activities.jsonl")
                 app = object.__new__(time_recorder.TimeRecorder)
                 app.interval_minutes = 5
                 app.idle_threshold_minutes = 0
@@ -165,6 +171,7 @@ class DailySummaryTests(unittest.TestCase):
         finally:
             time_recorder.CONFIG_DIR = old_dir
             time_recorder.CONFIG_FILE = old_file
+            time_recorder.ACTIVITIES_FILE = old_activities_file
 
     def test_load_config_keeps_daily_summary_disabled(self):
         app = object.__new__(time_recorder.TimeRecorder)
@@ -215,6 +222,54 @@ class DailySummaryTests(unittest.TestCase):
         self.assertEqual(app.daily_summary_time, "20:40")
         self.assertIsNone(app.last_daily_summary_date)
         app._save_config.assert_called_once()
+
+
+class SplitStorageTests(unittest.TestCase):
+    def test_activity_jsonl_append_and_load(self):
+        activities = [
+            {"date": "2026-06-11", "time": "09:00", "activity": "写代码"},
+            {"date": "2026-06-11", "time": "10:00", "activity": "开会"},
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "activities.jsonl")
+            for activity in activities:
+                time_recorder.append_activity_file(activity, path)
+
+            loaded = time_recorder.load_activities_file(path)
+
+        self.assertEqual(loaded, activities)
+
+    def test_write_activities_file_replaces_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "activities.jsonl")
+            time_recorder.append_activity_file({"activity": "旧记录"}, path)
+            time_recorder.write_activities_file([], path)
+
+            loaded = time_recorder.load_activities_file(path)
+
+        self.assertEqual(loaded, [])
+
+    def test_migrate_legacy_storage_splits_config_and_activities(self):
+        legacy_data = {
+            "interval_minutes": 15,
+            "presets": ["写代码"],
+            "activities": [{"date": "2026-06-11", "time": "09:00", "activity": "写代码"}],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            legacy_path = str(Path(tmp) / ".time_recorder.json")
+            config_path = str(Path(tmp) / ".time_recorder_config.json")
+            activities_path = str(Path(tmp) / ".time_recorder_activities.jsonl")
+            Path(legacy_path).write_text(json.dumps(legacy_data, ensure_ascii=False), encoding="utf-8")
+
+            config = time_recorder.migrate_legacy_storage(legacy_path, config_path, activities_path)
+            saved_config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+            activities = time_recorder.load_activities_file(activities_path)
+
+        self.assertEqual(config["interval_minutes"], 15)
+        self.assertNotIn("activities", saved_config)
+        self.assertEqual(activities, legacy_data["activities"])
 
 
 class LaunchAgentTests(unittest.TestCase):
