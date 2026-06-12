@@ -13,6 +13,7 @@
 | 依赖 | rumps, py2app |
 | 构建产物 | `dist/干啥来着.app`（arm64 原生） |
 | DMG 产物 | `releases/WhatAmIDoing-v{VERSION}.dmg` |
+| 版本来源 | `app_version.py` |
 
 ## 一次性环境准备
 
@@ -105,6 +106,10 @@ file dist/干啥来着.app/Contents/MacOS/time_recorder
 ```bash
 make dmg
 ```
+
+### 发布前改版本
+
+只需要修改 `app_version.py` 中的 `__version__`。`setup.py`、`Makefile` 和 `build_dmg.sh` 都会读取这个文件，不需要分别改版本号。
 
 ## 完整一键构建
 

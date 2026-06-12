@@ -12,13 +12,13 @@
     - 设置持久化（重启后保留）
 """
 
-__version__ = "1.4.15"
 __app_name__ = "⏰ 干啥来着"
 __bundle_id__ = "com.timerecorder.app"
 __repo_url__ = "https://github.com/newjokker/WhatAmIDoing"
 __github_api__ = "https://api.github.com/repos/newjokker/WhatAmIDoing/releases/latest"
 
 import rumps
+import csv
 import json
 import os
 import sys
@@ -30,6 +30,8 @@ import traceback
 import urllib.request
 import urllib.error
 import plistlib
+
+from app_version import __version__
 
 try:
     import threading
@@ -481,6 +483,31 @@ def export_activities_json(activities, directory=DOWNLOAD_DIR):
         raise
 
 
+def export_activities_csv(activities, directory=DOWNLOAD_DIR):
+    """导出活动记录为 CSV 文件，并返回保存路径。"""
+    os.makedirs(directory, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    filename = f"TimeRecorder-activities-{timestamp}.csv"
+    dest_path = unique_download_path(directory, filename)
+    tmp_path = f"{dest_path}.tmp"
+    fieldnames = ["timestamp", "date", "time", "activity"]
+    try:
+        with open(tmp_path, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for activity in activities or []:
+                writer.writerow(activity)
+        os.replace(tmp_path, dest_path)
+        return dest_path
+    except Exception:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def download_release_asset(url, dest_path):
     """把 Release asset 下载到本地，成功后返回保存路径。"""
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
@@ -680,6 +707,7 @@ class TimeRecorder(rumps.App):
         self.week_item = rumps.MenuItem("📆 本周汇总", callback=self._menu_callback("本周汇总", self.show_week_summary))
         self.all_item = rumps.MenuItem("📊 全部记录", callback=self._menu_callback("全部记录", self.show_all_summary))
         self.export_json_item = rumps.MenuItem("📤 导出 JSON", callback=self._menu_callback("导出 JSON", self.export_json))
+        self.export_csv_item = rumps.MenuItem("📄 导出 CSV", callback=self._menu_callback("导出 CSV", self.export_csv))
 
         # ── 设置子菜单 ──
         self.settings_menu = rumps.MenuItem("⚙ 设置")
@@ -735,6 +763,7 @@ class TimeRecorder(rumps.App):
             self.week_item,
             self.all_item,
             self.export_json_item,
+            self.export_csv_item,
             None,
             self.settings_menu,
             self.test_menu,
@@ -1359,6 +1388,22 @@ class TimeRecorder(rumps.App):
             return
 
         dest_path = export_activities_json(self.activities)
+        open_folder = safe_alert(
+            title="✅ 导出完成",
+            message=f"已导出 {len(self.activities)} 条记录到：\n{dest_path}\n\n是否打开所在文件夹？",
+            ok="打开",
+            cancel="稍后",
+        )
+        if open_folder:
+            subprocess.run(["open", os.path.dirname(dest_path)], check=False)
+
+    def export_csv(self, _):
+        """导出全部活动记录为 CSV 文件。"""
+        if not self.activities:
+            safe_alert(title="📄 导出 CSV", message="暂无记录可导出")
+            return
+
+        dest_path = export_activities_csv(self.activities)
         open_folder = safe_alert(
             title="✅ 导出完成",
             message=f"已导出 {len(self.activities)} 条记录到：\n{dest_path}\n\n是否打开所在文件夹？",

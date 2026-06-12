@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "time-recorder"
-version = "1.4.15"
+dynamic = ["version"]
 description = "⏰ 干啥来着 — macOS 菜单栏活动记录器"
 readme = "README.md"
 requires-python = ">=3.6"
@@ -24,11 +24,3 @@ classifiers = [
     "Topic :: Office/Business :: Scheduling",
 ]
 urls = {Homepage = "https://github.com/newjokker/WhatAmIDoing", Source = "https://github.com/newjokker/WhatAmIDoing", Releases = "https://github.com/newjokker/WhatAmIDoing/releases"}
-
-[tool.py2app]
-app = ["time_recorder.py"]
-iconfile = "icon.icns"
-frameworks = ["/opt/miniconda3/lib/libffi.8.dylib"]
-includes = ["ctypes"]
-packages = ["rumps"]
-plist = {CFBundleName = "干啥来着", CFBundleDisplayName = "⏰ 干啥来着", CFBundleIdentifier = "com.timerecorder.app", CFBundleVersion = "1.4.15", CFBundleShortVersionString = "1.4.15", CFBundleExecutable = "time_recorder", CFBundleDevelopmentRegion = "zh_CN", LSUIElement = true}

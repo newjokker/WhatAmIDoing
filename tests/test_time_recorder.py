@@ -1,4 +1,5 @@
 import datetime
+import csv
 import json
 import plistlib
 import sys
@@ -314,14 +315,19 @@ class VersionTests(unittest.TestCase):
         self.assertEqual(compare("v1.4.2", "1.4.2"), 0)
         self.assertLess(compare("1.4.1", "1.4.2"), 0)
 
-    def test_pyproject_version_matches_app_version(self):
+    def test_pyproject_does_not_hardcode_project_version(self):
         pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
-        version_line = next(
-            line for line in pyproject.read_text(encoding="utf-8").splitlines()
-            if line.startswith("version = ")
-        )
+        lines = pyproject.read_text(encoding="utf-8").splitlines()
 
-        self.assertEqual(version_line, f'version = "{time_recorder.__version__}"')
+        self.assertIn('dynamic = ["version"]', lines)
+        self.assertFalse(any(line.startswith("version = ") for line in lines))
+
+    def test_setup_reads_version_from_app_source(self):
+        setup_py = Path(__file__).resolve().parents[1] / "setup.py"
+        source = setup_py.read_text(encoding="utf-8")
+
+        self.assertIn("from app_version import __version__", source)
+        self.assertNotIn('VERSION = "1.', source)
 
 
 class UpdateDownloadTests(unittest.TestCase):
@@ -382,6 +388,36 @@ class ExportJsonTests(unittest.TestCase):
         self.assertTrue(path.endswith(".json"))
         self.assertEqual(data["total"], 2)
         self.assertEqual(data["activities"], activities)
+
+
+class ExportCsvTests(unittest.TestCase):
+    def test_export_activities_csv_writes_file(self):
+        activities = [
+            {
+                "timestamp": "2026-06-11T09:00:00",
+                "date": "2026-06-11",
+                "time": "09:00",
+                "activity": "写代码",
+            },
+            {
+                "timestamp": "2026-06-11T10:00:00",
+                "date": "2026-06-11",
+                "time": "10:00",
+                "activity": "开会",
+                "extra": "ignored",
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = time_recorder.export_activities_csv(activities, directory=tmp)
+            with open(path, "r", encoding="utf-8-sig", newline="") as f:
+                rows = list(csv.DictReader(f))
+
+        self.assertTrue(path.endswith(".csv"))
+        self.assertEqual(rows[0]["timestamp"], "2026-06-11T09:00:00")
+        self.assertEqual(rows[0]["activity"], "写代码")
+        self.assertEqual(rows[1]["activity"], "开会")
+        self.assertNotIn("extra", rows[1])
 
 
 class ErrorLogTests(unittest.TestCase):

@@ -16,7 +16,7 @@ PYTHON="/Users/jokkerling/.workbuddy/binaries/python/envs/default/bin/python"
 APP_NAME="干啥来着"
 
 # ── 读取版本号 ──
-VERSION=$(grep '__version__' "$SCRIPT_DIR/time_recorder.py" | head -1 | sed 's/.*= "//;s/".*//')
+VERSION=$(grep '__version__' "$SCRIPT_DIR/app_version.py" | head -1 | sed 's/.*= "//;s/".*//')
 DMG_NAME="WhatAmIDoing-v${VERSION}.dmg"
 
 echo "📦 构建 $APP_NAME v$VERSION"
@@ -45,6 +45,7 @@ trap cleanup EXIT
 # ── 复制源文件到临时目录 ──
 echo "📋 复制项目文件..."
 cp "$SCRIPT_DIR/time_recorder.py" "$BUILD_DIR/"
+cp "$SCRIPT_DIR/app_version.py" "$BUILD_DIR/"
 cp "$SCRIPT_DIR/setup.py" "$BUILD_DIR/"
 cp "$SCRIPT_DIR/pyproject.toml" "$BUILD_DIR/"
 cp "$SCRIPT_DIR/icon.icns" "$BUILD_DIR/"

@@ -3,7 +3,7 @@ SHELL   := /bin/bash
 PYTHON  := /Users/jokkerling/.workbuddy/binaries/python/versions/3.13.12/bin/python3
 PYTHON_ENV := /Users/jokkerling/.workbuddy/binaries/python/envs/default
 NAME    := 干啥来着
-VERSION := $(shell grep '__version__' time_recorder.py | head -1 | sed "s/.*= \"//;s/\".*//")
+VERSION := $(shell grep '__version__' app_version.py | head -1 | sed "s/.*= \"//;s/\".*//")
 .DEFAULT_GOAL := help
 
 # 构建前检查架构

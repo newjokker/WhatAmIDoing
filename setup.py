@@ -5,9 +5,12 @@ setup.py - py2app 打包配置
 
 from setuptools import setup
 
+from app_version import __version__
+
+
 APP = ["time_recorder.py"]
 DATA_FILES = []
-VERSION = "1.4.15"
+VERSION = __version__
 OPTIONS = {
     "argv_emulation": False,
     "iconfile": "icon.icns",
@@ -29,6 +32,7 @@ OPTIONS = {
 }
 
 setup(
+    version=VERSION,
     app=APP,
     data_files=DATA_FILES,
     options={"py2app": OPTIONS},
