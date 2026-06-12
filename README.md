@@ -97,6 +97,23 @@ python setup.py --version
 make dmg
 ```
 
+## Electron 原型
+
+当前分支包含一套 Electron 架构试验版，目标是复用现有数据文件并支持 macOS / Windows 桌面端。
+
+```bash
+# 安装 Electron 依赖
+npm install
+
+# 运行 Electron 版
+npm run electron
+
+# 运行 Electron 核心逻辑测试
+npm run test:electron
+```
+
+Electron 版继续读取 `~/.time_recorder_config.json` 和 `~/.time_recorder_activities.jsonl`，主进程负责托盘、定时器、系统空闲检测、导出与存储，渲染进程负责记录、设置和汇总界面。
+
 ## 许可
 
 MIT License

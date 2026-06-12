@@ -1,0 +1,35 @@
+{
+  "name": "what-am-i-doing-electron",
+  "version": "0.1.0",
+  "description": "干啥来着 Electron prototype",
+  "main": "electron/main.js",
+  "scripts": {
+    "electron": "electron .",
+    "electron:dev": "electron .",
+    "test:electron": "node --test electron/**/*.test.js"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7"
+  },
+  "build": {
+    "appId": "com.timerecorder.app",
+    "productName": "干啥来着",
+    "files": [
+      "electron/**/*",
+      "package.json",
+      "icon.icns",
+      "resourse/icn.png"
+    ],
+    "mac": {
+      "icon": "icon.icns",
+      "target": [
+        "dmg"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  }
+}

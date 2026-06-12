@@ -26,6 +26,13 @@ build/
 *.dmg
 releases/
 
+# ─── Node / Electron ───
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+out/
+
 # ─── Runtime Config ───
 .time_recorder.json
 

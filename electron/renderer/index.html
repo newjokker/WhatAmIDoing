@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>干啥来着</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="app">
+      <section class="toolbar">
+        <div>
+          <h1>干啥来着</h1>
+          <p id="statusLine">载入中</p>
+        </div>
+        <div class="toolbar-actions">
+          <button id="exportJson" type="button">导出 JSON</button>
+          <button id="exportCsv" type="button">导出 CSV</button>
+        </div>
+      </section>
+
+      <nav class="tabs" aria-label="视图">
+        <button class="tab" data-view="record" type="button">记录</button>
+        <button class="tab" data-view="today" type="button">今日</button>
+        <button class="tab" data-view="week" type="button">本周</button>
+        <button class="tab" data-view="all" type="button">全部</button>
+        <button class="tab" data-view="settings" type="button">设置</button>
+      </nav>
+
+      <section class="view" id="recordView">
+        <div class="section-head">
+          <h2>当前在做什么？</h2>
+          <span id="recordHint">选择预设，也可以输入自定义内容</span>
+        </div>
+        <div id="presetGrid" class="preset-grid"></div>
+        <label class="field">
+          <span>自定义</span>
+          <textarea id="customActivity" rows="4" placeholder="多个活动可用逗号、顿号或换行分隔"></textarea>
+        </label>
+        <p id="recordError" class="error" role="alert"></p>
+        <div class="action-row">
+          <button id="submitRecord" class="primary" type="button">记录</button>
+          <button id="skipRecord" type="button">跳过</button>
+        </div>
+      </section>
+
+      <section class="view" id="summaryView">
+        <div class="stats">
+          <div><span id="statTotal">0</span><small>总记录</small></div>
+          <div><span id="statDays">0</span><small>活跃天数</small></div>
+          <div><span id="statTop">暂无</span><small>最高频</small></div>
+        </div>
+        <div class="summary-layout">
+          <section>
+            <div class="section-head">
+              <h2>活动分布</h2>
+              <span id="summaryRange">全部记录</span>
+            </div>
+            <div id="activityCounts" class="count-list"></div>
+          </section>
+          <section>
+            <div class="section-head">
+              <h2>最近记录</h2>
+              <span id="recentCount">0 条</span>
+            </div>
+            <div id="recentList" class="recent-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="settingsView">
+        <div class="settings-grid">
+          <label class="field">
+            <span>记录间隔（分钟）</span>
+            <input id="intervalInput" type="number" min="1" max="120" step="1">
+          </label>
+          <label class="field">
+            <span>空闲阈值（分钟，0 为关闭）</span>
+            <input id="idleInput" type="number" min="0" max="120" step="1">
+          </label>
+          <label class="field">
+            <span>每日汇总时间</span>
+            <input id="dailyInput" type="text" placeholder="17:30 或 关闭">
+          </label>
+        </div>
+        <div class="action-row">
+          <button id="saveSettings" class="primary" type="button">保存设置</button>
+          <button id="openLogs" type="button">打开日志</button>
+          <button id="clearActivities" type="button">清空记录</button>
+        </div>
+        <section class="preset-manager">
+          <div class="section-head">
+            <h2>预设选项</h2>
+            <span id="presetLimit">0/12</span>
+          </div>
+          <div id="presetList" class="preset-list"></div>
+          <div class="inline-form">
+            <input id="newPreset" type="text" maxlength="20" placeholder="新增预设">
+            <button id="addPreset" type="button">添加</button>
+            <button id="resetPresets" type="button">恢复默认</button>
+          </div>
+        </section>
+      </section>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>
